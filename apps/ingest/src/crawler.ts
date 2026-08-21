@@ -25,6 +25,10 @@ export async function crawl(pool: pg.Pool, riot: RiotClient, opts: CrawlOptions)
   let stored = 0;
   let failed = 0;
 
+  // Items left in 'working' by a crashed/killed run go back to the queue.
+  const stale = await pool.query(`update match_queue set state = 'pending' where state = 'working'`);
+  if (stale.rowCount) log(`re-queued ${stale.rowCount} stale items`);
+
   for (;;) {
     if (opts.maxMatches !== undefined && stored >= opts.maxMatches) break;
 
