@@ -1,0 +1,35 @@
+{
+  "name": "draft-advisor",
+  "private": true,
+  "version": "0.0.1",
+  "description": "League of Legends draft assistant with calibrated uncertainty, player-level personalisation and probabilistic enemy-position inference.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "ddragon:sync": "node --experimental-strip-types apps/ingest/src/cli.ts ddragon-sync",
+    "db:migrate": "node --experimental-strip-types apps/ingest/src/cli.ts migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "pg": "^8.13.0",
+    "zod": "^3.23.0"
+  },
+  "type": "module"
+}
