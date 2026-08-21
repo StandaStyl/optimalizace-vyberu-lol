@@ -109,6 +109,11 @@ export class RiotClient {
     );
   }
 
+  /** League-V4: ranked entries of a player (used to fill tier for snowballed seeds). */
+  leagueByPuuid(platform: Platform, puuid: string) {
+    return this.get<Array<LeagueEntry & { queueType: string }>>(platform, `/lol/league/v4/entries/by-puuid/${puuid}`);
+  }
+
   /** Match-V5: match ids for a puuid. */
   matchIds(region: Region, puuid: string, queue: number, count = 20, start = 0, startTime?: number) {
     const q = new URLSearchParams({ queue: String(queue), count: String(count), start: String(start) });
