@@ -16,7 +16,9 @@
     "test": "vitest run",
     "lint": "eslint .",
     "ddragon:sync": "node --experimental-strip-types apps/ingest/src/cli.ts ddragon-sync",
-    "db:migrate": "node --experimental-strip-types apps/ingest/src/cli.ts migrate"
+    "db:migrate": "node --experimental-strip-types apps/ingest/src/cli.ts migrate",
+    "model:refresh": "node --experimental-strip-types apps/model/src/cli.ts refresh",
+    "model:score": "node --experimental-strip-types apps/model/src/cli.ts score"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
