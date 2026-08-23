@@ -13,6 +13,7 @@
   <nav>
     <button data-tab="draft" class="active">Draft</button>
     <button data-tab="player">Hráč</button>
+    <button data-tab="champion">Šampion</button>
     <button data-tab="model">Model</button>
   </nav>
   <div class="meta" id="meta">načítám…</div>
@@ -57,6 +58,15 @@
     <label>Riot ID <input id="riotId" placeholder="Jméno#TAG (EUNE / EUW)"> <button id="loadPlayer">Načíst</button></label>
     <div id="profileHead" class="hint"></div>
     <table id="playerTable"><thead><tr><th>Šampion</th><th>Pozice</th><th>Her</th><th>WR</th><th>Naposledy</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section id="tab-champion" class="tab">
+  <div class="panel">
+    <h2>Stránka šampiona</h2>
+    <label>Šampion <input id="champName" list="champList" placeholder="např. Darius"> <select id="champBand"><option value="all">vše</option><option value="low">Iron–Gold</option><option value="mid">Platinum–Emerald</option><option value="high">Diamond+</option></select></label>
+    <div id="champHead"></div>
+    <div id="champBody"></div>
   </div>
 </section>
 

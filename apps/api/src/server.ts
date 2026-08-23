@@ -4,7 +4,7 @@ import { extname, join, normalize } from "node:path";
 import type pg from "pg";
 import { POSITIONS, type Platform, type Position, type RiotClient, type TierBand } from "@da/core";
 import { resolveProfile } from "./profile.ts";
-import { DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot } from "@da/model";
+import { championPage, DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot } from "@da/model";
 
 export interface ApiOptions {
   pool: pg.Pool;
@@ -92,6 +92,18 @@ export function createApi(opts: ApiOptions) {
             threats: r.threats.map((t) => ({ ...t, name: nm(t.champ) })) })),
           bans,
         });
+      }
+
+      if (url.pathname.startsWith("/api/champion/")) {
+        const id = Number(url.pathname.slice("/api/champion/".length));
+        const c = await get();
+        if (!c.names.has(id)) return json(res, 404, { error: "unknown champion" });
+        const band = url.searchParams.get("band") ?? "all";
+        const src = c.byBand.get(c.byBand.has(band) ? band : "all")!;
+        const page = championPage(id, src, DEFAULT_PARAMS);
+        const nm = (x: number) => ({ name: c.names.get(x)?.name ?? String(x), key: c.names.get(x)?.key });
+        return json(res, 200, { patch: c.patch, band, ...nm(id), ...page,
+          byPosition: page.byPosition.map((b) => ({ ...b, counters: b.counters.map((r) => ({ ...r, ...nm(r.champ) })), countered: b.countered.map((r) => ({ ...r, ...nm(r.champ) })), synergies: b.synergies.map((r) => ({ ...r, ...nm(r.champ) })), antiSynergies: b.antiSynergies.map((r) => ({ ...r, ...nm(r.champ) })) })) });
       }
 
       if (url.pathname === "/api/winprob" && req.method === "POST") {

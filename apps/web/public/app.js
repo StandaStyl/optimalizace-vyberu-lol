@@ -26,6 +26,8 @@ async function init() {
   ["#myPos", "#band", "#puuid"].forEach((s) => $(s).addEventListener("change", score));
   $("#loadPlayer").addEventListener("click", loadPlayer);
   $("#riotId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadPlayer(); });
+  $("#champName").addEventListener("change", loadChampion);
+  $("#champBand").addEventListener("change", loadChampion);
   score();
 }
 
@@ -88,6 +90,20 @@ async function loadPlayer() {
     · <button id="useForDraft">Použít pro draft</button> · <a href="/privacy.html">smazat moje data</a>`;
   $("#useForDraft").onclick = () => { $("#puuid").value = r.puuid; if (r.band) $("#band").value = r.band; document.querySelector('nav button[data-tab="draft"]').click(); score(); };
   $("#playerTable tbody").innerHTML = r.champions.map((c) => `<tr><td class="champ"><img src="${icon(c.key)}" alt="">${c.name ?? c.champion_id}</td><td>${POS_CS[c.position] ?? "?"}</td><td>${c.games}</td><td>${(100 * c.wins / c.games).toFixed(0)} %</td><td>${new Date(c.last_played).toLocaleDateString("cs")}</td></tr>`).join("") || "<tr><td colspan=5>žádné zápasy v našich datech</td></tr>";
+}
+
+async function loadChampion() {
+  const c = byName.get($("#champName").value.trim().toLowerCase()); if (!c) return;
+  const r = await fetch(`/api/champion/${c.id}?band=${$("#champBand").value}`).then((x) => x.json());
+  if (r.error) { $("#champHead").textContent = r.error; return; }
+  const pc = (v) => (v * 100).toFixed(1) + " %";
+  $("#champHead").innerHTML = `<p class="champ" style="display:flex;align-items:center;gap:10px"><img src="${icon(r.key)}" alt="" style="width:48px;height:48px;border-radius:6px"><b style="font-size:1.2rem">${r.name}</b> <span class="hint">patch ${r.patch} · pásmo ${r.band}</span></p>
+    <table><thead><tr><th>Pozice</th><th>Her</th><th>Podíl</th><th>WR (posterior)</th><th>80% interval</th></tr></thead><tbody>${r.positions.map((p) => `<tr><td>${POS_CS[p.pos]}</td><td>${p.games}</td><td>${pc(p.share)}</td><td><b>${pc(p.wr)}</b></td><td>${pc(p.lo)}–${pc(p.hi)}</td></tr>`).join("")}</tbody></table>`;
+  const rows = (xs) => xs.length ? xs.map((x) => `<tr><td class="champ"><img src="${icon(x.key)}" alt="">${x.name}</td><td>${POS_CS[x.pos]}</td><td>${x.games}</td><td>${pc(x.wr)}</td><td><span class="term ${x.delta >= 0 ? "pos" : "neg"}">${x.delta >= 0 ? "+" : ""}${x.delta.toFixed(2)}</span> <span class="hint">(${x.lo.toFixed(2)}…${x.hi.toFixed(2)})</span></td></tr>`).join("") : "<tr><td colspan=5 class=hint>málo dat</td></tr>";
+  const block = (title, xs) => `<h3 style="margin:14px 0 6px;font:600 .95rem Literata,serif">${title}</h3><table><thead><tr><th>Šampion</th><th>Pozice</th><th>Her</th><th>WR</th><th>Δ log‑odds vs. nezávislost (80 %)</th></tr></thead><tbody>${rows(xs)}</tbody></table>`;
+  $("#champBody").innerHTML = r.byPosition.map((b) => `<div class="panel" style="margin-top:12px"><h2>${r.name} na pozici ${POS_CS[b.pos]}</h2>
+    ${block("Vítězí proti (nejlepší matchupy)", b.counters)}${block("Prohrává proti (nejhorší matchupy)", b.countered)}
+    ${block("Nejlepší synergie", b.synergies)}${block("Nejhorší synergie", b.antiSynergies)}</div>`).join("") || "<p class=hint>šampion nemá na žádné pozici dost her</p>";
 }
 
 async function loadReplay() {
