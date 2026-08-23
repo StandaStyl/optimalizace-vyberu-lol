@@ -3,5 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "dependencies": { "@da/core": "*" }
+  "dependencies": {
+    "@da/core": "*"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts"
 }

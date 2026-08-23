@@ -83,6 +83,14 @@ describe("scoreDraft", () => {
     expect(withMe.find((r) => r.champ === 2)!.contributions.some((c) => c.kind === "player")).toBe(true);
   });
 
+  it("drops one-off picks on a position", () => {
+    const s = world();
+    const strength = s.strength;
+    const withOneOff: StatsSource = { ...s, strength: (c, p) => (c === 6 && p === "BOTTOM" ? { games: 1, wins: 1 } : strength(c, p)) };
+    const recs = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, withOneOff, fast);
+    expect(recs.map((r) => r.champ)).not.toContain(6); // 1 of 1001 games on BOTTOM < 3 %
+  });
+
   it("indifference classes group overlapping intervals", () => {
     const classes = indifferenceClasses([
       { champ: 1, p: 0.55, lo: 0.52, hi: 0.58, contributions: [] },

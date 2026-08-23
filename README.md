@@ -18,8 +18,8 @@ Scope for now: **EUNE + EUW, Ranked Solo/Duo (queue 420)**.
 packages/core     shared types, Riot API client (rate-limited), Data Dragon, DB + migrations
 apps/ingest       crawler + Data Dragon sync + CLI
 apps/model        posteriors, scoring, position inference, evaluation   (phase 2–3)
-apps/api          HTTP API                                               (phase 4)
-apps/web          Next.js UI                                             (phase 4)
+apps/api          HTTP API (node:http, no framework) + serves apps/web/public
+apps/web/public   static UI: draft simulator, player page, model evaluation page
 apps/desktop      Tauri LCU connector                                    (phase 5)
 infra/migrations  SQL, applied in lexical order by `npm run db:migrate`
 ```
@@ -32,7 +32,12 @@ cp .env.example .env     # fill RIOT_API_KEY and DATABASE_URL (Supabase)
 npm run db:migrate
 npm run ddragon:sync
 npm test
+npm run model:refresh     # materialise aggregates (daily)
+npm run api               # http://localhost:8787
 ```
+
+API: `GET /api/champions`, `POST /api/score {myPos, allies[], enemies[], bans[], band?, myPuuid?}`,
+`POST /api/winprob {blue[], red[]}`, `GET /api/player/:puuid`, `GET /api/model/eval`, `GET /api/health`.
 
 Requires Node ≥ 22 (uses `--experimental-strip-types`; no build step for scripts).
 

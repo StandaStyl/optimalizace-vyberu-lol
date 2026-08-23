@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft Advisor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@500;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="eyebrow">Draft Advisor</span><h1 id="title">Výběr šampiona</h1></div>
+  <nav>
+    <button data-tab="draft" class="active">Draft</button>
+    <button data-tab="player">Hráč</button>
+    <button data-tab="model">Model</button>
+  </nav>
+  <div class="meta" id="meta">načítám…</div>
+</header>
+
+<main>
+<section id="tab-draft" class="tab active">
+  <div class="draft-grid">
+    <div class="panel">
+      <h2>Náš tým</h2>
+      <label>Moje pozice
+        <select id="myPos">
+          <option value="TOP">Top</option><option value="JUNGLE">Jungle</option><option value="MIDDLE">Mid</option>
+          <option value="BOTTOM" selected>Bot (ADC)</option><option value="UTILITY">Support</option>
+        </select>
+      </label>
+      <label>Tierové pásmo
+        <select id="band"><option value="all">vše</option><option value="low">Iron–Gold</option><option value="mid">Platinum–Emerald</option><option value="high">Diamond+</option></select>
+      </label>
+      <label>Můj puuid (volitelné, pro osobní člen) <input id="puuid" placeholder="puuid z Riot API"></label>
+      <div id="allies" class="slots"></div>
+    </div>
+    <div class="panel">
+      <h2>Soupeř</h2>
+      <p class="hint">Pozice soupeřů se odhadují z dat; můžete je ale zadat, pokud je znáte.</p>
+      <div id="enemies" class="slots"></div>
+      <h2>Bany</h2>
+      <div id="bans" class="slots bans"></div>
+    </div>
+  </div>
+  <div class="panel results">
+    <div class="results-head"><h2>Doporučení</h2><span id="resultMeta" class="hint"></span></div>
+    <div id="enemyPos" class="hint"></div>
+    <table id="recs"><thead><tr><th>Třída</th><th>Šampion</th><th>P(výhra)</th><th>80% interval</th><th>Her</th><th>Rozpad (log‑odds)</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section id="tab-player" class="tab">
+  <div class="panel">
+    <h2>Historie hráče</h2>
+    <label>puuid <input id="playerPuuid" placeholder="puuid"> <button id="loadPlayer">Načíst</button></label>
+    <table id="playerTable"><thead><tr><th>Šampion</th><th>Pozice</th><th>Her</th><th>WR</th><th>Naposledy</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section id="tab-model" class="tab">
+  <div class="panel">
+    <h2>Jak dobrý je model</h2>
+    <p class="hint">Holdout: statistiky jen z her před cutoffem, test na hrách po něm. Cíl: plný model &lt; párový v log‑loss, ECE &lt; 0,01, AUC ≥ 0,56.</p>
+    <div id="dataSummary"></div>
+    <table id="evalTable"><thead><tr><th>Run</th><th>Patch</th><th>Pásmo</th><th>Varianta</th><th>Her</th><th>log‑loss</th><th>Brier</th><th>AUC</th><th>ECE</th></tr></thead><tbody></tbody></table>
+    <div id="calib"></div>
+  </div>
+</section>
+</main>
+
+<datalist id="champList"></datalist>
+<script src="/app.js"></script>
+</body>
+</html>

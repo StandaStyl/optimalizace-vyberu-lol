@@ -19,7 +19,8 @@
     "db:migrate": "node --experimental-strip-types apps/ingest/src/cli.ts migrate",
     "model:refresh": "node --experimental-strip-types apps/model/src/cli.ts refresh",
     "model:score": "node --experimental-strip-types apps/model/src/cli.ts score",
-    "model:eval": "node --experimental-strip-types apps/model/src/cli.ts eval"
+    "model:eval": "node --experimental-strip-types apps/model/src/cli.ts eval",
+    "api": "node --experimental-strip-types apps/api/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

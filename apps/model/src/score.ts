@@ -143,6 +143,16 @@ export function inferEnemyPositions(enemies: Slot[], src: StatsSource): Map<numb
   return result;
 }
 
+/** A champion counts as "played on this position" when it has ≥3 % of its games there or ≥20 games there. */
+export function playedOnPosition(champ: number, pos: Position, src: StatsSource): boolean {
+  const games = src.strength(champ, pos)?.games ?? 0;
+  if (games >= 20) return true;
+  const pr = src.positionPrior(champ);
+  if (!pr) return games > 0;
+  const total = Object.values(pr).reduce((a, b) => a + (b ?? 0), 0);
+  return total > 0 && (pr[pos] ?? 0) / total >= 0.03;
+}
+
 /** Score every eligible champion for `state.myPos`. */
 export function scoreDraft(state: DraftState, src: StatsSource, params: ModelParams = DEFAULT_PARAMS, seed = 42): Recommendation[] {
   const taken = new Set([...state.bans, ...state.allies.map((a) => a.champ), ...state.enemies.map((e) => e.champ)]);
@@ -158,8 +168,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
   for (const champ of src.champions()) {
     if (taken.has(champ)) continue;
     const sMe = strengthOf(champ, state.myPos);
-    const playedHere = (src.strength(champ, state.myPos)?.games ?? 0) > 0;
-    if (!playedHere) continue; // thesis rule: recommend only champions actually played on this position
+    if (!playedOnPosition(champ, state.myPos, src)) continue; // thesis rule, tightened: a real pick on this position, not a one-off
 
     const terms: Array<{ c: Contribution; post: BetaPosterior; expectedLogit: number; weight: number }> = [];
     terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: src.strength(champ, state.myPos)?.games ?? 0 }, post: sMe, expectedLogit: 0, weight: 1 });
