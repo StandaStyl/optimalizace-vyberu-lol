@@ -12,6 +12,10 @@ rebuilt on a probabilistic footing:
 
 Scope for now: **EUNE + EUW, Ranked Solo/Duo (queue 420)**.
 
+## Specifications
+
+Binding decisions live in [docs/specs](docs/specs/README.md) (SPEC-01 … SPEC-05). Change a decision there first, then the code.
+
 ## Layout
 
 ```
