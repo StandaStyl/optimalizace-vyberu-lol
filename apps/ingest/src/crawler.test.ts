@@ -20,7 +20,7 @@ function match(over: Partial<MatchDto["info"]> = {}): MatchDto {
   return {
     metadata: { matchId: "EUN1_1", participants: participants.map((p) => p.puuid) },
     info: { gameCreation: 1_700_000_000_000, gameDuration: 1800, gameVersion: "16.16.707.1", queueId: 420, platformId: "EUN1",
-      participants, teams: [{ teamId: 100, win: true }, { teamId: 200, win: false }], ...over },
+      participants, teams: [{ teamId: 100, win: true, bans: [{ championId: 99, pickTurn: 1 }, { championId: -1, pickTurn: 2 }] }, { teamId: 200, win: false, bans: [{ championId: 55, pickTurn: 6 }] }], ...over },
   };
 }
 
@@ -42,6 +42,7 @@ describe("storeMatch", () => {
     expect(sqls[0]).toBe("begin");
     expect(sqls.filter((s) => s.includes("insert into participant")).length).toBe(10);
     expect(sqls.some((s) => s.includes("insert into seed_player"))).toBe(true);
+    expect(sqls.filter((s) => s.includes("insert into match_ban")).length).toBe(2); // -1 skipped
     expect(sqls.at(-1)).toBe("commit");
     const m = calls.find((c) => c.sql.includes("insert into match("))!;
     expect(m.params![2]).toBe("16.16");

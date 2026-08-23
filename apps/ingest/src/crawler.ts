@@ -145,6 +145,13 @@ export async function storeMatch(pool: pg.Pool, dto: MatchDto, platform: Platfor
         ],
       );
     }
+    for (const t of info.teams) {
+      for (const b of t.bans ?? []) {
+        if (b.championId <= 0) continue; // -1 = no ban
+        await c.query(`insert into match_ban(match_id, team_id, champion_id, pick_turn) values ($1,$2,$3,$4) on conflict do nothing`,
+          [dto.metadata.matchId, t.teamId, b.championId, b.pickTurn]);
+      }
+    }
     // Snowball: unknown players become seeds with unknown tier (filled later by lookupTiers()).
     await c.query(
       `insert into seed_player(puuid, platform) select unnest($1::text[]), $2 on conflict do nothing`,

@@ -13,6 +13,7 @@
 - **H2** Personalizace (hráčský člen) přidá predikční sílu: plný model < párový v log-loss.
 - **H3** Synergie závisí na tieru (rozptyl synergických členů roste s tierem).
 - **H4** Inference pozic soupeřů z částečného draftu je přesná.
+- **H5** Interakce vyššího řádu (trojice) mají měřitelný přínos nad aditivní párový model (viz SPEC-06).
 
 ## Důsledky
 - Každý model run má uložené parametry a metriky (`model_run`, `model_eval`).

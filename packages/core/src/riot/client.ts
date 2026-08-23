@@ -61,7 +61,7 @@ export interface MatchDto {
     queueId: number;
     platformId: string;
     participants: MatchParticipantDto[];
-    teams: Array<{ teamId: number; win: boolean }>;
+    teams: Array<{ teamId: number; win: boolean; bans?: Array<{ championId: number; pickTurn: number }> }>;
   };
 }
 
