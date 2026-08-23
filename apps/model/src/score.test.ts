@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Position } from "@da/core";
-import { DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, scoreDraft, type StatsSource, type WinLoss } from "./score.ts";
+import { DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, recommendBans, scoreDraft, type StatsSource, type WinLoss } from "./score.ts";
 import { mean, posterior, sampleBeta, rng, quantile } from "./stats.ts";
 
 /** Tiny synthetic world: champs 1..6. 1 = strong ADC, 2 = weak ADC, 3 = ADC that counters 4, 4 = enemy ADC, 5 = support, 6 = jungler. */
@@ -52,7 +52,7 @@ describe("scoreDraft", () => {
   const fast = { ...DEFAULT_PARAMS, mcSamples: 300 };
 
   it("ranks by strength when nothing else is known and returns intervals", () => {
-    const recs = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, world(), fast);
+    const recs = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, world(), { ...fast, futureWeight: 0 });
     expect(recs[0]!.champ).toBe(1);
     expect(recs.at(-1)!.champ).toBe(2);
     expect(recs.length).toBe(4); // 5 and 6 never played BOTTOM
@@ -91,11 +91,28 @@ describe("scoreDraft", () => {
     expect(recs.map((r) => r.champ)).not.toContain(6); // 1 of 1001 games on BOTTOM < 3 %
   });
 
+  it("future picks: unbanned counter lowers champ 3, banning it removes the threat; ban recommendation names it", () => {
+    // world(): 4 counters 3 (3 vs 4 = 0.62 for 3? no: matchup "3:BOTTOM|4:BOTTOM" 0.62 means 3 beats 4). Build a world where 4 beats 3 instead.
+    const s = world();
+    const m = s.matchup;
+    const w: StatsSource = { ...s, matchup: (a, pa, b, pb) => (a === 3 && b === 4 ? { games: 400, wins: 140 } : m(a, pa, b, pb)) };
+    const noBan = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, w, fast);
+    const withBan = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [4] }, w, fast);
+    const p3 = (rs: typeof noBan) => rs.find((r) => r.champ === 3)!;
+    expect(p3(noBan).contributions.find((c) => c.kind === "future_matchup")!.logOdds).toBeLessThan(-0.01);
+    expect(p3(noBan).threats[0]!.champ).toBe(4);
+    expect(p3(withBan).p).toBeGreaterThan(p3(noBan).p);
+    expect(p3(withBan).threats.some((x) => x.champ === 4)).toBe(false);
+    const bans = recommendBans({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, noBan, w, fast);
+    expect(bans[0]!.champ).toBe(4);
+    expect(bans[0]!.expectedLoss).toBeLessThan(0);
+  });
+
   it("indifference classes group overlapping intervals", () => {
     const classes = indifferenceClasses([
-      { champ: 1, p: 0.55, lo: 0.52, hi: 0.58, contributions: [] },
-      { champ: 2, p: 0.54, lo: 0.51, hi: 0.57, contributions: [] },
-      { champ: 3, p: 0.48, lo: 0.45, hi: 0.51, contributions: [] },
+      { champ: 1, p: 0.55, lo: 0.52, hi: 0.58, contributions: [], threats: [] },
+      { champ: 2, p: 0.54, lo: 0.51, hi: 0.57, contributions: [], threats: [] },
+      { champ: 3, p: 0.48, lo: 0.45, hi: 0.51, contributions: [], threats: [] },
     ]);
     expect(classes).toEqual([[1, 2], [3]]);
   });

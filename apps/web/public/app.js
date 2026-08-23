@@ -62,6 +62,8 @@ async function doScore() {
   $("#resultMeta").textContent = `patch ${r.patch} · pásmo ${r.band} · ${r.candidates} kandidátů`;
   const ep = Object.entries(r.enemyPositions || {});
   $("#enemyPos").innerHTML = ep.length ? "Odhad pozic soupeřů: " + ep.map(([id, d]) => { const c = champs.find((x) => x.id === Number(id)); const best = Object.entries(d).sort((a, b) => b[1] - a[1])[0]; return `<b>${c?.name ?? id}</b> → ${POS_CS[best[0]]} (${Math.round(best[1] * 100)} %)`; }).join(" · ") : "";
+  $("#banRecs").innerHTML = r.bans?.length ? "Doporučené bany (největší očekávaná ztráta pro naše top kandidáty): " + r.bans.slice(0, 5).map((b) => `<b>${b.name}</b> ${(b.expectedLoss * 100).toFixed(1)} (pick ${Math.round(b.pPick * 100)} %)`).join(" · ") : "";
+  const KIND = { matchup: "vs", synergy: "+", player: "já", future_matchup: "⌛vs", future_synergy: "⌛+" };
   const min = Math.min(...r.recommendations.map((x) => x.lo), 0.4), max = Math.max(...r.recommendations.map((x) => x.hi), 0.6);
   const pct = (v) => ((v - min) / (max - min) * 100).toFixed(1);
   $("#recs tbody").innerHTML = r.recommendations.map((x) => `<tr>
@@ -70,7 +72,8 @@ async function doScore() {
     <td><b>${(x.p * 100).toFixed(1)} %</b></td>
     <td><span class="bar"><i style="left:${pct(x.lo)}%;width:${(pct(x.hi) - pct(x.lo)).toFixed(1)}%"></i><b style="left:${pct(x.p)}%"></b></span>${(x.lo * 100).toFixed(1)}–${(x.hi * 100).toFixed(1)}</td>
     <td>${x.contributions.find((c) => c.kind === "strength")?.games ?? 0}</td>
-    <td>${x.contributions.filter((c) => c.kind !== "strength").map((c) => `<span class="term ${c.logOdds >= 0 ? "pos" : "neg"}" title="${c.games} her">${{ matchup: "vs", synergy: "+", player: "já" }[c.kind]} ${c.vsName ?? ""}${c.vsPos ? " " + POS_CS[c.vsPos] : ""} ${c.logOdds >= 0 ? "+" : ""}${c.logOdds.toFixed(2)}</span>`).join("")}</td>
+    <td>${x.contributions.filter((c) => c.kind !== "strength").map((c) => `<span class="term ${c.logOdds >= 0 ? "pos" : "neg"}" title="${c.games} her">${KIND[c.kind]} ${c.vsName ?? ""}${c.vsPos ? " " + POS_CS[c.vsPos] : ""} ${c.logOdds >= 0 ? "+" : ""}${c.logOdds.toFixed(2)}</span>`).join("")}</td>
+    <td>${(x.threats || []).slice(0, 3).map((t) => `<span class="term neg" title="pick ${Math.round(t.pPick * 100)} %">${t.name} ${POS_CS[t.pos]} ${t.logOdds.toFixed(2)}</span>`).join("")}</td>
   </tr>`).join("");
 }
 

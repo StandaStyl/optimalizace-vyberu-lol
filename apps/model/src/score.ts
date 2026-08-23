@@ -10,6 +10,10 @@ export interface ModelParams {
   recencyTauDays: number;
   intervalLevel: number;
   mcSamples: number;
+  /** Weight of expected-future-pick terms (SPEC-06 §2); 0 disables them. Tuned by validation. */
+  futureWeight: number;
+  /** Future-pick distribution: ignore champions below this pick share on a position (noise cut). */
+  futureMinShare: number;
 }
 export const DEFAULT_PARAMS: ModelParams = {
   priorNStrength: 500,
@@ -19,6 +23,8 @@ export const DEFAULT_PARAMS: ModelParams = {
   recencyTauDays: 60,
   intervalLevel: 0.8,
   mcSamples: 1000,
+  futureWeight: 1,
+  futureMinShare: 0.01,
 };
 
 export interface WinLoss {
@@ -58,12 +64,21 @@ export interface DraftState {
 }
 
 export interface Contribution {
-  kind: "strength" | "matchup" | "synergy" | "player";
+  kind: "strength" | "matchup" | "synergy" | "player" | "future_matchup" | "future_synergy";
   vs?: number;
   vsPos?: Position;
   /** Log-odds contribution (posterior mean). */
   logOdds: number;
   games: number;
+}
+
+export interface Threat {
+  champ: number;
+  pos: Position;
+  /** Probability the enemy still picks this champion on this position. */
+  pPick: number;
+  /** Counter log-odds if it happens (negative = threat). */
+  logOdds: number;
 }
 
 export interface Recommendation {
@@ -72,6 +87,8 @@ export interface Recommendation {
   lo: number;
   hi: number;
   contributions: Contribution[];
+  /** Most harmful not-yet-picked, not-banned enemy champions for this candidate. */
+  threats: Threat[];
 }
 
 /**
@@ -153,10 +170,34 @@ export function playedOnPosition(champ: number, pos: Position, src: StatsSource)
   return total > 0 && (pr[pos] ?? 0) / total >= 0.03;
 }
 
+/** P(champion | position) from pick counts, excluding `excluded` champions; empty map when nothing is known. */
+export function pickDistribution(pos: Position, src: StatsSource, excluded: Set<number>, minShare: number): Map<number, number> {
+  const out = new Map<number, number>();
+  let total = 0;
+  for (const ch of src.champions()) {
+    if (excluded.has(ch)) continue;
+    const g = src.strength(ch, pos)?.games ?? 0;
+    if (g > 0) { out.set(ch, g); total += g; }
+  }
+  if (!total) return out;
+  for (const [ch, g] of out) { const s = g / total; if (s < minShare) out.delete(ch); else out.set(ch, s); }
+  const z = [...out.values()].reduce((a, b) => a + b, 0) || 1;
+  for (const [ch, s] of out) out.set(ch, s / z);
+  return out;
+}
+
+/** How much of each enemy position is already occupied (sum of inferred position probabilities). */
+export function enemyOccupancy(enemyPos: Map<number, Partial<Record<Position, number>>>): Record<Position, number> {
+  const occ = { TOP: 0, JUNGLE: 0, MIDDLE: 0, BOTTOM: 0, UTILITY: 0 } as Record<Position, number>;
+  for (const dist of enemyPos.values()) for (const p of POSITIONS) occ[p] = Math.min(1, occ[p] + (dist[p] ?? 0));
+  return occ;
+}
+
 /** Score every eligible champion for `state.myPos`. */
 export function scoreDraft(state: DraftState, src: StatsSource, params: ModelParams = DEFAULT_PARAMS, seed = 42): Recommendation[] {
   const taken = new Set([...state.bans, ...state.allies.map((a) => a.champ), ...state.enemies.map((e) => e.champ)]);
   const enemyPos = inferEnemyPositions(state.enemies, src);
+  const occupancy = enemyOccupancy(enemyPos);
   const u = rng(seed);
   const out: Recommendation[] = [];
 
@@ -170,7 +211,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
     const sMe = strengthOf(champ, state.myPos);
     if (!playedOnPosition(champ, state.myPos, src)) continue; // thesis rule, tightened: a real pick on this position, not a one-off
 
-    const terms: Array<{ c: Contribution; post: BetaPosterior; expectedLogit: number; weight: number }> = [];
+    const terms: Array<{ c: Contribution; post: BetaPosterior | null; expectedLogit: number; weight: number }> = [];
     terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: src.strength(champ, state.myPos)?.games ?? 0 }, post: sMe, expectedLogit: 0, weight: 1 });
 
     // Counters vs each enemy: expectation over their inferred positions.
@@ -207,17 +248,53 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       }
     }
 
+    // Expected future picks (SPEC-06 §2): enemies on unfilled positions and allies on unfilled positions,
+    // drawn from pick rates with bans and already-picked champions excluded. Deterministic expectation (no MC).
+    const threats: Threat[] = [];
+    if (params.futureWeight > 0) {
+      const excl = new Set([...taken, champ]);
+      let fm = 0, fmGames = 0;
+      for (const pos of POSITIONS) {
+        const free = 1 - occupancy[pos];
+        if (free < 0.02) continue;
+        const dist = pickDistribution(pos, src, excl, params.futureMinShare);
+        for (const [y, py] of dist) {
+          const sB = mean(strengthOf(y, pos));
+          const obs = src.matchup(champ, state.myPos, y, pos);
+          const t = deviationTerm(obs, independence(mean(sMe), sB), params.priorNMatchup);
+          fm += free * py * t.logOdds; fmGames += obs?.games ?? 0;
+          if (t.logOdds < 0) threats.push({ champ: y, pos, pPick: free * py, logOdds: t.logOdds });
+        }
+      }
+      terms.push({ c: { kind: "future_matchup", logOdds: params.futureWeight * fm, games: fmGames }, post: null, expectedLogit: 0, weight: 0 });
+
+      let fs = 0, fsGames = 0;
+      const allyFilled = new Set<Position>([state.myPos, ...state.allies.flatMap((a) => (a.pos ? [a.pos] : []))]);
+      for (const pos of POSITIONS) {
+        if (allyFilled.has(pos)) continue;
+        const dist = pickDistribution(pos, src, excl, params.futureMinShare);
+        for (const [y, py] of dist) {
+          const sB = mean(strengthOf(y, pos));
+          const obs = src.synergy(champ, state.myPos, y, pos);
+          const t = deviationTerm(obs, sigmoid((logit(mean(sMe)) + logit(sB)) / 2), params.priorNSynergy);
+          fs += py * t.logOdds; fsGames += obs?.games ?? 0;
+        }
+      }
+      terms.push({ c: { kind: "future_synergy", logOdds: params.futureWeight * fs, games: fsGames }, post: null, expectedLogit: 0, weight: 0 });
+    }
+    threats.sort((a, b) => a.pPick * a.logOdds - b.pPick * b.logOdds);
+
     const point = terms.reduce((acc, t) => acc + t.c.logOdds, 0);
     // Monte-Carlo interval: sample each term's posterior independently.
     const samples: number[] = new Array(params.mcSamples);
     for (let i = 0; i < params.mcSamples; i++) {
       let x = 0;
-      for (const t of terms) x += (logit(sampleBeta(t.post, u)) - t.expectedLogit) * t.weight;
+      for (const t of terms) x += t.post ? (logit(sampleBeta(t.post, u)) - t.expectedLogit) * t.weight : t.c.logOdds;
       samples[i] = sigmoid(x);
     }
     samples.sort((a, b) => a - b);
     const tail = (1 - params.intervalLevel) / 2;
-    out.push({ champ, p: sigmoid(point), lo: quantile(samples, tail), hi: quantile(samples, 1 - tail), contributions: terms.map((t) => t.c) });
+    out.push({ champ, p: sigmoid(point), lo: quantile(samples, tail), hi: quantile(samples, 1 - tail), contributions: terms.map((t) => t.c), threats: threats.slice(0, 5) });
   }
   return out.sort((a, b) => b.p - a.p);
 }
@@ -239,4 +316,43 @@ export function indifferenceClasses(recs: Recommendation[]): number[][] {
   }
   if (current.length) classes.push(current.map((x) => x.champ));
   return classes;
+}
+
+export interface BanRecommendation {
+  champ: number;
+  /** Expected loss (log-odds) to our top candidates if this champion stays available. */
+  expectedLoss: number;
+  /** Probability the enemy picks it somewhere. */
+  pPick: number;
+}
+
+/**
+ * Ban = champion whose availability costs our best candidates the most (SPEC-06 §3):
+ * loss(Y) = Σ_k w_k · Σ_pos free(pos)·P(Y|pos)·C(X_k vs Y at pos), over the top-K candidates weighted by rank.
+ */
+export function recommendBans(state: DraftState, recs: Recommendation[], src: StatsSource, params: ModelParams = DEFAULT_PARAMS, topK = 5): BanRecommendation[] {
+  const taken = new Set([...state.bans, ...state.allies.map((a) => a.champ), ...state.enemies.map((e) => e.champ)]);
+  const occupancy = enemyOccupancy(inferEnemyPositions(state.enemies, src));
+  const top = recs.slice(0, topK);
+  const weights = top.map((_, i) => 1 / (i + 1));
+  const wz = weights.reduce((a, b) => a + b, 0);
+  const strengthOf = (ch: number, pos: Position) => { const s = src.strength(ch, pos); return posterior(s?.wins ?? 0, (s?.games ?? 0) - (s?.wins ?? 0), 0.5, params.priorNStrength); };
+  const loss = new Map<number, { loss: number; pPick: number }>();
+  top.forEach((r, k) => {
+    const sMe = mean(strengthOf(r.champ, state.myPos));
+    for (const pos of POSITIONS) {
+      const free = 1 - occupancy[pos];
+      if (free < 0.02) continue;
+      const dist = pickDistribution(pos, src, new Set([...taken, r.champ]), params.futureMinShare);
+      for (const [y, py] of dist) {
+        const t = deviationTerm(src.matchup(r.champ, state.myPos, y, pos), independence(sMe, mean(strengthOf(y, pos))), params.priorNMatchup);
+        const cur = loss.get(y) ?? { loss: 0, pPick: 0 };
+        cur.loss += (weights[k]! / wz) * free * py * t.logOdds;
+        if (k === 0) cur.pPick += free * py;
+        loss.set(y, cur);
+      }
+    }
+  });
+  return [...loss].map(([champ, v]) => ({ champ, expectedLoss: v.loss, pPick: Math.min(1, v.pPick) }))
+    .filter((b) => b.expectedLoss < 0).sort((a, b) => a.expectedLoss - b.expectedLoss).slice(0, 10);
 }
