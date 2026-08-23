@@ -25,6 +25,7 @@ async function init() {
   }));
   ["#myPos", "#band", "#puuid"].forEach((s) => $(s).addEventListener("change", score));
   $("#loadPlayer").addEventListener("click", loadPlayer);
+  $("#riotId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadPlayer(); });
   score();
 }
 
@@ -78,9 +79,15 @@ async function doScore() {
 }
 
 async function loadPlayer() {
-  const puuid = $("#playerPuuid").value.trim(); if (!puuid) return;
-  const r = await fetch("/api/player/" + encodeURIComponent(puuid)).then((x) => x.json());
-  $("#playerTable tbody").innerHTML = r.champions.map((c) => `<tr><td>${c.name ?? c.champion_id}</td><td>${POS_CS[c.position] ?? "?"}</td><td>${c.games}</td><td>${(100 * c.wins / c.games).toFixed(0)} %</td><td>${new Date(c.last_played).toLocaleDateString("cs")}</td></tr>`).join("") || "<tr><td colspan=5>žádná data</td></tr>";
+  const riotId = $("#riotId").value.trim(); if (!riotId) return;
+  $("#profileHead").textContent = "hledám…";
+  const r = await fetch("/api/profile?riotId=" + encodeURIComponent(riotId)).then((x) => x.json());
+  if (r.error) { $("#profileHead").textContent = "Chyba: " + r.error; $("#playerTable tbody").innerHTML = ""; return; }
+  const BAND = { low: "Iron–Gold", mid: "Platinum–Emerald", high: "Diamond+" };
+  $("#profileHead").innerHTML = `<b>${r.gameName}#${r.tagLine}</b> · ${r.platform.toUpperCase()} · ${r.tier ? r.tier + " " + r.division : "bez ranku"} (${BAND[r.band] ?? "pásmo neznámé"}) · ${r.inDb ? "v datech" : "zatím žádná historie v našich datech"}
+    · <button id="useForDraft">Použít pro draft</button> · <a href="/privacy.html">smazat moje data</a>`;
+  $("#useForDraft").onclick = () => { $("#puuid").value = r.puuid; if (r.band) $("#band").value = r.band; document.querySelector('nav button[data-tab="draft"]').click(); score(); };
+  $("#playerTable tbody").innerHTML = r.champions.map((c) => `<tr><td class="champ"><img src="${icon(c.key)}" alt="">${c.name ?? c.champion_id}</td><td>${POS_CS[c.position] ?? "?"}</td><td>${c.games}</td><td>${(100 * c.wins / c.games).toFixed(0)} %</td><td>${new Date(c.last_played).toLocaleDateString("cs")}</td></tr>`).join("") || "<tr><td colspan=5>žádné zápasy v našich datech</td></tr>";
 }
 
 async function loadReplay() {

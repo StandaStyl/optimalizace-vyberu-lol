@@ -109,6 +109,16 @@ export class RiotClient {
     );
   }
 
+  /** Account-V1: Riot ID (gameName#tagLine) → puuid. Regional routing. */
+  accountByRiotId(region: Region, gameName: string, tagLine: string) {
+    return this.get<{ puuid: string; gameName: string; tagLine: string }>(region, `/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`);
+  }
+
+  /** Summoner-V4: exists on this platform? (404 when the account has no summoner there). */
+  summonerByPuuid(platform: Platform, puuid: string) {
+    return this.get<{ puuid: string; summonerLevel: number; profileIconId: number }>(platform, `/lol/summoner/v4/summoners/by-puuid/${puuid}`);
+  }
+
   /** League-V4: ranked entries of a player (used to fill tier for snowballed seeds). */
   leagueByPuuid(platform: Platform, puuid: string) {
     return this.get<Array<LeagueEntry & { queueType: string }>>(platform, `/lol/league/v4/entries/by-puuid/${puuid}`);

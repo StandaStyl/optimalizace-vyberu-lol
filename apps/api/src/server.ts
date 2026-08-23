@@ -2,13 +2,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import type pg from "pg";
-import { POSITIONS, type Platform, type Position, type TierBand } from "@da/core";
+import { POSITIONS, type Platform, type Position, type RiotClient, type TierBand } from "@da/core";
+import { resolveProfile } from "./profile.ts";
 import { DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot } from "@da/model";
 
 export interface ApiOptions {
   pool: pg.Pool;
   platforms: Platform[];
   staticDir: string;
+  /** Riot client for identity/rank lookups (optional: without it the profile endpoint is disabled). */
+  riot?: RiotClient;
   /** Reload aggregates from DB this often. */
   reloadMs?: number;
 }
@@ -109,6 +112,16 @@ export function createApi(opts: ApiOptions) {
         return json(res, 200, { anonymised: true, rowsTouched: r.rows[0]?.n ?? 0 });
       }
 
+      // SPEC-02/04: profile by Riot ID; identity + rank via Riot API, history from our DB.
+      if (url.pathname === "/api/profile") {
+        const riotId = url.searchParams.get("riotId") ?? "";
+        if (!opts.riot) return json(res, 503, { error: "Riot API key not configured" });
+        const prof = await resolveProfile(opts.pool, opts.riot, opts.platforms, riotId);
+        const c = await get();
+        const rows = (await opts.pool.query(`select champion_id, position, games, wins, last_played from agg_player_champ where puuid = $1 order by games desc limit 60`, [prof.puuid])).rows;
+        return json(res, 200, { ...prof, champions: rows.map((r) => ({ ...r, name: c.names.get(r.champion_id)?.name, key: c.names.get(r.champion_id)?.key })) });
+      }
+
       if (url.pathname.startsWith("/api/player/")) {
         const puuid = decodeURIComponent(url.pathname.slice("/api/player/".length));
         const rows = (await opts.pool.query(`select champion_id, position, games, wins, last_played from agg_player_champ where puuid = $1 order by games desc limit 60`, [puuid])).rows;
@@ -139,7 +152,9 @@ export function createApi(opts: ApiOptions) {
       } catch { /* fallthrough */ }
       return json(res, 404, { error: "not found" });
     } catch (e) {
-      return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      const status = /Riot API 404/.test(msg) ? 404 : /Riot API 429/.test(msg) ? 429 : /must look like|No summoner/.test(msg) ? 400 : 500;
+      return json(res, status, { error: /Riot API 404/.test(msg) ? "Riot ID not found" : msg });
     }
   }
 
