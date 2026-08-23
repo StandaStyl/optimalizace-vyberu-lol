@@ -60,12 +60,23 @@ export async function loadTrainSource(pool: pg.Pool, scope: EvalScope): Promise<
      group by 1,2`, [scope.platforms, scope.cutoff])).rows)
     player.set(`${r.puuid}:${r.champion_id}`, { games: r.games, wins: r.wins, lastPlayedDaysAgo: Number(r.days) });
 
+  // Position priors from training games (all bands — position choice is not band-specific enough to split).
+  const prior = new Map<number, Partial<Record<Position, number>>>();
+  for (const r of (await pool.query<{ champion_id: number; position: Position; games: number }>(
+    `select p.champion_id, p.position, count(*)::int games from participant p join match m using (match_id)
+     where m.patch = $1 and m.platform = any($2) and m.game_start < $3 and p.position is not null group by 1,2`,
+    [scope.patch, scope.platforms, scope.cutoff])).rows) {
+    const m = prior.get(r.champion_id) ?? {};
+    m[r.position] = r.games;
+    prior.set(r.champion_id, m);
+  }
+
   const champions = [...new Set([...strength.keys()].map((k) => Number(k.split(":")[0])))];
   return {
     strength: (c, p) => strength.get(`${c}:${p}`),
     matchup: (a, pa, b, pb) => matchup.get(`${a}:${pa}|${b}:${pb}`),
     synergy: (a, pa, b, pb) => synergy.get(`${a}:${pa}|${b}:${pb}`),
-    positionPrior: () => undefined,
+    positionPrior: (c) => prior.get(c),
     player: (puuid, c) => player.get(`${puuid}:${c}`),
     champions: () => champions,
   };

@@ -20,7 +20,8 @@
     "model:refresh": "node --experimental-strip-types apps/model/src/cli.ts refresh",
     "model:score": "node --experimental-strip-types apps/model/src/cli.ts score",
     "model:eval": "node --experimental-strip-types apps/model/src/cli.ts eval",
-    "api": "node --experimental-strip-types apps/api/src/index.ts"
+    "api": "node --experimental-strip-types apps/api/src/index.ts",
+    "model:replay": "node --experimental-strip-types apps/model/src/cli.ts replay"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

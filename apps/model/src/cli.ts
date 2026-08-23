@@ -2,10 +2,12 @@ import { getPool, loadConfig, type Position } from "@da/core";
 import { loadStatsSource } from "./dbSource.ts";
 import { DEFAULT_PARAMS, indifferenceClasses, scoreDraft, type Slot } from "./score.ts";
 import { gridSearch, persistEval, runEval } from "./eval.ts";
+import { runReplay } from "./replay.ts";
 
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
   eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
+  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--persist]   retrospective draft replay (reality check)
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -33,6 +35,28 @@ async function main(argv: string[]) {
       const r = await pool.query(`select name, rows from mat_refresh order by 1`);
       console.table(r.rows);
       console.log(`refreshed in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      return;
+    }
+    if (cmd === "replay") {
+      const patch = arg(argv, "--patch") ?? (await pool.query<{ patch: string }>(`select patch from match group by 1 order by count(*) desc limit 1`)).rows[0]?.patch;
+      if (!patch) throw new Error("no data");
+      const band = (arg(argv, "--band") ?? null) as "low" | "mid" | "high" | null;
+      const days = Number(arg(argv, "--cutoff-days") ?? 3);
+      const mx = (await pool.query<{ mx: Date }>(`select max(game_start) mx from match where patch = $1`, [patch])).rows[0]!.mx;
+      const cutoff = new Date(mx.getTime() - days * 86400_000);
+      const scope = { patch, platforms: cfg.platforms, tierBand: band, cutoff };
+      const { report } = await runReplay(pool, scope, DEFAULT_PARAMS, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
+      console.log(`replay: ${report.games} games, ${report.picks} picks, coverage ${(report.coverage * 100).toFixed(1)} %`);
+      console.log(`lift: class 1 WR ${(report.lift.class1.wr * 100).toFixed(1)} % (n=${report.lift.class1.n}) vs other ${(report.lift.other.wr * 100).toFixed(1)} % (n=${report.lift.other.n}) → ${(report.lift.diff * 100).toFixed(1)} p.b.`);
+      console.table(report.byRank.map((b) => ({ rank: b.bucket, n: b.n, wr: (b.wr * 100).toFixed(1) + "%", meanP: (b.meanP * 100).toFixed(1) + "%" })));
+      const c = report.calibration;
+      console.log(`calibration of P(chosen): logloss ${c.logloss.toFixed(5)}, brier ${c.brier.toFixed(5)}, auc ${c.auc.toFixed(4)}, ece ${c.ece.toFixed(4)}`);
+      console.table(report.positionAccuracy.map((p) => ({ knownEnemies: p.knownEnemies, n: p.n, accuracy: Number.isNaN(p.accuracy) ? "-" : (p.accuracy * 100).toFixed(1) + "%" })));
+      if (argv.includes("--persist")) {
+        const run = await pool.query<{ run_id: number }>(`insert into model_run(patch, tier_band, params) values ($1,$2,$3) returning run_id`, [patch, band, { ...DEFAULT_PARAMS, cutoff: cutoff.toISOString(), kind: "replay" }]);
+        await pool.query(`insert into model_replay(run_id, games, picks, report) values ($1,$2,$3,$4)`, [run.rows[0]!.run_id, report.games, report.picks, JSON.stringify(report)]);
+        console.log("saved replay run", run.rows[0]!.run_id);
+      }
       return;
     }
     if (cmd === "eval") {
