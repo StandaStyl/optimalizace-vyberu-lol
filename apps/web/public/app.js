@@ -80,7 +80,19 @@ async function loadPlayer() {
   $("#playerTable tbody").innerHTML = r.champions.map((c) => `<tr><td>${c.name ?? c.champion_id}</td><td>${POS_CS[c.position] ?? "?"}</td><td>${c.games}</td><td>${(100 * c.wins / c.games).toFixed(0)} %</td><td>${new Date(c.last_played).toLocaleDateString("cs")}</td></tr>`).join("") || "<tr><td colspan=5>žádná data</td></tr>";
 }
 
+async function loadReplay() {
+  const r = await fetch("/api/model/replay").then((x) => x.json());
+  const run = r.runs[0]; if (!run) { $("#replay").innerHTML = "<p class=hint>zatím žádné přehrání</p>"; return; }
+  const rep = run.report, pc = (v) => Number.isFinite(v) ? (v * 100).toFixed(1) + " %" : "–";
+  $("#replay").innerHTML = `<p>Run ${run.run_id} · patch ${run.patch} · ${run.games} her · ${run.picks} picků · pokrytí ${pc(rep.coverage)}</p>
+    <p><b>Lift:</b> třída 1 WR ${pc(rep.lift.class1.wr)} (n=${rep.lift.class1.n}) vs. ostatní ${pc(rep.lift.other.wr)} (n=${rep.lift.other.n}) → ${(rep.lift.diff * 100).toFixed(1)} p.b.</p>
+    <table><thead><tr><th>Rank zvoleného</th><th>n</th><th>skutečný WR</th><th>predikované P</th></tr></thead><tbody>${rep.byRank.map((b) => `<tr><td>${b.bucket}</td><td>${b.n}</td><td>${pc(b.wr)}</td><td>${pc(b.meanP)}</td></tr>`).join("")}</tbody></table>
+    <p><b>Kalibrace P(zvolený):</b> log‑loss ${rep.calibration.logloss.toFixed(4)} · Brier ${rep.calibration.brier.toFixed(4)} · AUC ${rep.calibration.auc.toFixed(3)} · ECE ${rep.calibration.ece.toFixed(3)}</p>
+    <table><thead><tr><th>Známých soupeřů</th><th>n</th><th>přesnost odhadu pozic (H4)</th></tr></thead><tbody>${rep.positionAccuracy.map((p) => `<tr><td>${p.knownEnemies}</td><td>${p.n}</td><td>${pc(p.accuracy)}</td></tr>`).join("")}</tbody></table>`;
+}
+
 async function loadModel() {
+  loadReplay();
   const r = await fetch("/api/model/eval").then((x) => x.json());
   $("#dataSummary").innerHTML = "<p>Data: " + r.data.map((d) => `<b>${d.patch}</b> ${d.games} her (${new Date(d.first).toLocaleDateString("cs")} – ${new Date(d.last).toLocaleDateString("cs")})`).join(" · ") + "</p>";
   $("#evalTable tbody").innerHTML = r.runs.map((e) => `<tr><td>${e.run_id}</td><td>${e.patch}</td><td>${e.tier_band ?? "vše"}</td><td>${e.baseline}</td><td>${e.n_games}</td><td>${Number(e.logloss).toFixed(4)}</td><td>${Number(e.brier).toFixed(4)}</td><td>${Number(e.auc).toFixed(3)}</td><td>${Number(e.ece).toFixed(3)}</td></tr>`).join("") || "<tr><td colspan=9>zatím žádná evaluace</td></tr>";

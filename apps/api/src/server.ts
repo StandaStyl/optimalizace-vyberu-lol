@@ -97,11 +97,25 @@ export function createApi(opts: ApiOptions) {
         return json(res, 200, { patch: c.patch, blue: blue.length, red: red.length, pBlue: teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.full), pBluePairwise: teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.pairwise) });
       }
 
+      // SPEC-02: delete my data — irreversible anonymisation of a puuid across all tables.
+      if (url.pathname === "/api/player/delete" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        if (typeof body.puuid !== "string" || body.puuid.length < 20) return json(res, 400, { error: "puuid required" });
+        const r = await opts.pool.query<{ n: number }>(`select anonymise_player($1) as n`, [body.puuid]);
+        return json(res, 200, { anonymised: true, rowsTouched: r.rows[0]?.n ?? 0 });
+      }
+
       if (url.pathname.startsWith("/api/player/")) {
         const puuid = decodeURIComponent(url.pathname.slice("/api/player/".length));
         const rows = (await opts.pool.query(`select champion_id, position, games, wins, last_played from agg_player_champ where puuid = $1 order by games desc limit 60`, [puuid])).rows;
         const c = await get();
         return json(res, 200, { puuid, champions: rows.map((r) => ({ ...r, name: c.names.get(r.champion_id)?.name })) });
+      }
+
+      if (url.pathname === "/api/model/replay") {
+        const rows = (await opts.pool.query(`select r.run_id, r.patch, r.tier_band, r.created_at, p.games, p.picks, p.report
+          from model_replay p join model_run r using (run_id) order by r.run_id desc limit 10`)).rows;
+        return json(res, 200, { runs: rows });
       }
 
       if (url.pathname === "/api/model/eval") {

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Draft Advisor – ochrana dat</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap"><link rel="stylesheet" href="/app.css"></head>
+<body>
+<header><div class="brand"><span class="eyebrow">Draft Advisor</span><h1>Ochrana dat a právní informace</h1></div><nav><a href="/"><button>Zpět do aplikace</button></a></nav></header>
+<main>
+<div class="panel">
+<h2>Jaká data ukládáme</h2>
+<p>Z veřejného Riot Games API ukládáme údaje o hodnocených zápasech (Solo/Duo, EUNE a EUW): identifikátor zápasu, patch, délku, vítěze a pro každého účastníka jeho <b>puuid</b> (technický identifikátor účtu), tým, šampiona, pozici, výsledek, předměty, runy a součty poškození. Neukládáme chat, jména ani časové osy.</p>
+<p>Riot ID (jméno#tag) ukládáme pouze u hráčů, které někdo vyhledá na stránce profilu, a to odděleně od dat o zápasech.</p>
+<h2>K čemu data slouží</h2>
+<p>K výpočtu souhrnných statistik šampionů (síla, matchupy, synergie) a k osobnímu doporučení pro hráče, který si zobrazí vlastní profil. Projekt je akademický (navazuje na diplomovou práci, UP Olomouc 2017) a metriky modelu jsou veřejné.</p>
+<h2>Smazání mých dat</h2>
+<p>Zadejte svůj puuid. Ve všech tabulkách bude nahrazen nevratným náhodným tokenem a záznam Riot ID bude smazán. Souhrnné statistiky šampionů tím nejsou dotčeny (nejsou osobními údaji).</p>
+<label>puuid <input id="puuid" placeholder="puuid"></label>
+<button id="del">Smazat moje data</button> <span id="msg" class="hint"></span>
+<h2>Riot Games</h2>
+<p>Draft Advisor isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p>
+<h2>Kontakt</h2>
+<p>Správce: Mgr. Jan Musil. Dotazy a žádosti týkající se dat posílejte na e‑mail uvedený v repozitáři projektu.</p>
+</div>
+</main>
+<script>
+document.getElementById("del").onclick = async () => {
+  const puuid = document.getElementById("puuid").value.trim();
+  if (!puuid || !confirm("Opravdu nevratně anonymizovat tento účet?")) return;
+  const r = await fetch("/api/player/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puuid }) }).then((x) => x.json());
+  document.getElementById("msg").textContent = r.error ? "Chyba: " + r.error : `Hotovo, upraveno ${r.rowsTouched} záznamů.`;
+};
+</script>
+</body></html>

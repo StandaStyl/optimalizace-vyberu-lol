@@ -66,8 +66,14 @@
     <table id="evalTable"><thead><tr><th>Run</th><th>Patch</th><th>Pásmo</th><th>Varianta</th><th>Her</th><th>log‑loss</th><th>Brier</th><th>AUC</th><th>ECE</th></tr></thead><tbody></tbody></table>
     <div id="calib"></div>
   </div>
+  <div class="panel">
+    <h2>Kontrola reality (retrospektivní přehrání draftů)</h2>
+    <p class="hint">Každé reálné hře je nasimulován draft 1‑2‑2‑2‑2‑1; v okamžiku každého picku model zná jen dříve vybrané šampiony. Měříme, jak si vedl hráčem skutečně zvolený šampion.</p>
+    <div id="replay"></div>
+  </div>
 </section>
 </main>
+<footer class="hint" style="text-align:center;padding:16px">Draft Advisor isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. · <a href="/privacy.html">Ochrana dat a smazání mých dat</a></footer>
 
 <datalist id="champList"></datalist>
 <script src="/app.js"></script>
