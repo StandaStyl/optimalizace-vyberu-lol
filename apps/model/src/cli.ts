@@ -1,9 +1,11 @@
 import { getPool, loadConfig, type Position } from "@da/core";
 import { loadStatsSource } from "./dbSource.ts";
 import { DEFAULT_PARAMS, indifferenceClasses, scoreDraft, type Slot } from "./score.ts";
+import { gridSearch, persistEval, runEval } from "./eval.ts";
 
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
+  eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -31,6 +33,27 @@ async function main(argv: string[]) {
       const r = await pool.query(`select name, rows from mat_refresh order by 1`);
       console.table(r.rows);
       console.log(`refreshed in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      return;
+    }
+    if (cmd === "eval") {
+      const patch = arg(argv, "--patch") ?? (await pool.query<{ patch: string }>(`select patch from match group by 1 order by count(*) desc limit 1`)).rows[0]?.patch;
+      if (!patch) throw new Error("no data");
+      const band = (arg(argv, "--band") ?? null) as "low" | "mid" | "high" | null;
+      let cutoff: Date;
+      if (arg(argv, "--cutoff")) cutoff = new Date(arg(argv, "--cutoff")!);
+      else {
+        // default: split so that the last --cutoff-days (default 3) days of data are the test set
+        const days = Number(arg(argv, "--cutoff-days") ?? 3);
+        const mx = (await pool.query<{ mx: Date }>(`select max(game_start) mx from match where patch = $1`, [patch])).rows[0]!.mx;
+        cutoff = new Date(mx.getTime() - days * 86400_000);
+      }
+      const scope = { patch, platforms: cfg.platforms, tierBand: band, cutoff };
+      let params = DEFAULT_PARAMS;
+      if (argv.includes("--grid")) params = (await gridSearch(pool, scope)).best;
+      const rep = await runEval(pool, scope, params);
+      console.log(`patch ${patch}, band ${band ?? "all"}, cutoff ${cutoff.toISOString()}, train ${rep.trainGames} games, test ${rep.testGames} games`);
+      console.table(Object.entries(rep.results).map(([k, m]) => ({ variant: k, logloss: m.logloss.toFixed(5), brier: m.brier.toFixed(5), auc: m.auc.toFixed(4), ece: m.ece.toFixed(4), acc: (m.accuracy * 100).toFixed(1) + "%" })));
+      if (argv.includes("--persist")) console.log("saved run", await persistEval(pool, rep, "holdout_same_patch"));
       return;
     }
     if (cmd === "score") {
