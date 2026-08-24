@@ -12,9 +12,11 @@ rebuilt on a probabilistic footing:
 
 Scope for now: **EUNE + EUW, Ranked Solo/Duo (queue 420)**.
 
-## Specifications
+## Start here
 
-Binding decisions live in [docs/specs](docs/specs/README.md) (SPEC-01 … SPEC-05). Change a decision there first, then the code.
+- [`docs/HANDOVER.md`](docs/HANDOVER.md) — how to run everything, current state, what is next, known pitfalls.
+- [`PONAUCENI.md`](PONAUCENI.md) — every mistake this project already made and how it was fixed. Read before touching the setup.
+- [`docs/specs`](docs/specs/README.md) — SPEC-01 … SPEC-06 are binding decisions. Change a decision there first, then the code.
 
 ## Layout
 
@@ -24,7 +26,7 @@ apps/ingest       crawler + Data Dragon sync + CLI
 apps/model        posteriors, scoring, position inference, evaluation   (phase 2–3)
 apps/api          HTTP API (node:http, no framework) + serves apps/web/public
 apps/web/public   static UI: draft simulator, player page, model evaluation page
-apps/desktop      Tauri LCU connector                                    (phase 5)
+apps/desktop      Node LCU connector                                     (planned)
 infra/migrations  SQL, applied in lexical order by `npm run db:migrate`
 ```
 
