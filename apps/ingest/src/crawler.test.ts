@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type pg from "pg";
 import type { MatchDto, MatchParticipantDto } from "@da/core";
-import { storeMatch } from "./crawler.ts";
+import { RiotApiError, type RiotClient } from "@da/core";
+import { crawl, ExpiredKeyError, storeMatch } from "./crawler.ts";
 
 const POS = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 
@@ -60,5 +61,38 @@ describe("storeMatch", () => {
     m.info.participants[3]!.teamPosition = "";
     expect(await storeMatch(pool, m, "eun1", 420)).toBe(false);
     expect(calls.length).toBe(0);
+  });
+});
+
+describe("crawl", () => {
+  /**
+   * Pool stub routed by SQL fragment. `pendingSequence` lets a test hand out one batch and then
+   * report an empty queue, so the loop terminates the way it does in production.
+   */
+  function poolFor(batchSize: number, pendingSequence: string[]) {
+    let i = 0;
+    const query = async (sql: string) => {
+      if (sql.includes("state = 'pending' where state = 'working'")) return { rows: [], rowCount: 0 };
+      if (sql.includes("count(*)::text as n")) return { rows: [{ n: pendingSequence[Math.min(i++, pendingSequence.length - 1)] }], rowCount: 1 };
+      if (sql.includes("from seed_player")) return { rows: [], rowCount: 0 };
+      if (sql.includes("returning match_id, platform")) return { rows: Array.from({ length: batchSize }, (_, k) => ({ match_id: `EUN1_${k}`, platform: "eun1" })), rowCount: batchSize };
+      return { rows: [], rowCount: 1 };
+    };
+    return { query, connect: async () => ({ query, release: () => {} }) } as unknown as pg.Pool;
+  }
+  const riotThatFails = (status: number) => ({
+    regionOf: () => "europe",
+    match: async () => { throw new RiotApiError(status, "https://x"); },
+  }) as unknown as RiotClient;
+
+  it("aborts with ExpiredKeyError after repeated 401s instead of draining the queue", async () => {
+    await expect(crawl(poolFor(20, ["500"]), riotThatFails(401), { platforms: ["eun1"], queueId: 420, log: () => {} }))
+      .rejects.toBeInstanceOf(ExpiredKeyError);
+  });
+
+  it("treats 404 as a normal per-match failure and finishes when the queue empties", async () => {
+    const r = await crawl(poolFor(3, ["500", "0"]), riotThatFails(404), { platforms: ["eun1"], queueId: 420, log: () => {} });
+    expect(r.stored).toBe(0);
+    expect(r.failed).toBe(3);
   });
 });

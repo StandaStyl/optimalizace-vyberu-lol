@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { getPool, loadConfig, migrate, RiotClient } from "@da/core";
 import { ddragonSync } from "./ddragonSync.ts";
 import { seedPlayers } from "./seed.ts";
-import { crawl } from "./crawler.ts";
+import { crawl, ExpiredKeyError } from "./crawler.ts";
 import { lookupTiers } from "./lookupTiers.ts";
 import { prospectiveSummary, resolveLogs } from "./resolveLogs.ts";
 
@@ -77,7 +77,13 @@ async function main(argv: string[]) {
         let stop = false;
         for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { console.log(`${sig} — dokončuji dávku a končím`); stop = true; });
         while (!stop) {
-          const r = await crawl(pool, riot(), { platforms: cfg.platforms, queueId: cfg.QUEUE_ID, maxMatches: batch });
+          let r: { stored: number; failed: number };
+          try {
+            r = await crawl(pool, riot(), { platforms: cfg.platforms, queueId: cfg.QUEUE_ID, maxMatches: batch });
+          } catch (e) {
+            if (e instanceof ExpiredKeyError) { console.error(e.message); process.exitCode = 1; break; }
+            throw e;
+          }
           console.log(`batch: stored ${r.stored}, failed ${r.failed}`);
           await pool.query(`select infer_match_bands()`);
           await pool.query(`select refresh_aggregates()`);

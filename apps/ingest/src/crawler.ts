@@ -1,6 +1,18 @@
 import type pg from "pg";
 import { RiotApiError, RiotClient, patchOf, POSITIONS, type MatchDto, type MatchParticipantDto, type Platform, type Position } from "@da/core";
 
+/** Riot returns 401 (and sometimes 403) for an expired or revoked key — every call then fails. */
+export class ExpiredKeyError extends Error {
+  constructor() {
+    super("Riot API key rejected (401/403) — the development key expires after 24 h. Put a fresh key in .env as RIOT_API_KEY.");
+    this.name = "ExpiredKeyError";
+  }
+}
+const AUTH_FAILURE_LIMIT = 5;
+function isAuthError(e: unknown): boolean {
+  return e instanceof RiotApiError && (e.status === 401 || e.status === 403);
+}
+
 export interface CrawlOptions {
   platforms: Platform[];
   queueId: number;
@@ -24,6 +36,7 @@ export async function crawl(pool: pg.Pool, riot: RiotClient, opts: CrawlOptions)
   const perPlayer = opts.matchesPerPlayer ?? 20;
   let stored = 0;
   let failed = 0;
+  let authFailures = 0;
 
   // Items left in 'working' by a crashed/killed run go back to the queue.
   const stale = await pool.query(`update match_queue set state = 'pending' where state = 'working'`);
@@ -55,14 +68,18 @@ export async function crawl(pool: pg.Pool, riot: RiotClient, opts: CrawlOptions)
         const ok = await storeMatch(pool, dto, row.platform, opts.queueId);
         await pool.query(`update match_queue set state = $2, done_at = now() where match_id = $1`, [row.match_id, ok ? "done" : "skipped"]);
         if (ok) stored++;
+        authFailures = 0;
       } catch (e) {
         failed++;
+        if (isAuthError(e)) authFailures++; else authFailures = 0;
         const permanent = e instanceof RiotApiError && (e.status === 404 || e.status === 403);
         await pool.query(
           `update match_queue set state = case when $2 or attempts >= 3 then 'failed' else 'pending' end where match_id = $1`,
           [row.match_id, permanent],
         );
         log(`match ${row.match_id}: ${(e as Error).message}`);
+        // An expired key fails every request; without this the queue would silently drain to 'failed'.
+        if (authFailures >= AUTH_FAILURE_LIMIT) throw new ExpiredKeyError();
       }
     }
     log(`stored ${stored}, failed ${failed}`);
@@ -81,9 +98,11 @@ async function enqueueFromSeeds(
     [platforms, players],
   );
   let total = 0;
+  let authFailures = 0;
   for (const s of seeds.rows) {
     try {
       const ids = await riot.matchIds(riot.regionOf(s.platform), s.puuid, queueId, perPlayer, 0, startTime);
+      authFailures = 0;
       if (ids.length) {
         const r = await pool.query(
           `insert into match_queue(match_id, platform) select unnest($1::text[]), $2 on conflict do nothing`,
@@ -92,7 +111,9 @@ async function enqueueFromSeeds(
         total += r.rowCount ?? 0;
       }
     } catch (e) {
+      if (isAuthError(e)) authFailures++; else authFailures = 0;
       log(`ids for ${s.puuid.slice(0, 8)}…: ${(e as Error).message}`);
+      if (authFailures >= AUTH_FAILURE_LIMIT) throw new ExpiredKeyError();
     }
     await pool.query(`update seed_player set last_crawled = now() where puuid = $1`, [s.puuid]);
   }
