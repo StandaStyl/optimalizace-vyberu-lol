@@ -4,6 +4,19 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 24. 8. 2026 — Expirovaný Riot klíč: crawler tiše skončil s klamnou hláškou
+
+**Co se stalo:** dev klíč expiroval uprostřed běhu. Každý požadavek začal vracet 401, ale
+crawler 401 nepovažoval za trvalou chybu — položky se po třech pokusech přesunuly do `failed`,
+`enqueueFromSeeds` také jen logoval a vracel 0, až fronta došla a smyčka skončila hláškou
+„queue empty and no uncrawled seeds left". V logu tedy nebylo poznat, že šlo o klíč, a chybový
+soubor zůstal prázdný. Zjistilo se to až podle toho, že počet zápasů v DB přestal růst.
+
+**Řešení:** `crawl()` a `enqueueFromSeeds()` počítají po sobě jdoucí 401/403 a po pěti vyhodí
+`ExpiredKeyError` s návodem („vlož nový klíč do .env"). `worker` na ni skončí s exit code 1,
+aby ji hosting nahlásil. Obecné pravidlo: **chyba autentizace není chyba jedné položky** —
+selhává jí všechno, takže musí zastavit celý job, ne se schovat do statistiky selhání.
+
 ## 24. 8. 2026 — Rozdělené vlastnictví tabulek: migrace přes MCP vs. přes aplikaci
 
 **Co se stalo:** tabulky z migrací 0001 a 0002 vznikly přes Supabase MCP (vlastník `postgres`),
