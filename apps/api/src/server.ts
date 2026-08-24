@@ -85,13 +85,34 @@ export function createApi(opts: ApiOptions) {
         const top = Math.min(Number(body.top ?? 20), 60);
         const nm = (id: number) => c.names.get(id)?.name ?? String(id);
         const bans = recommendBans(state, recs, src, DEFAULT_PARAMS).map((b) => ({ ...b, name: nm(b.champ), key: c.names.get(b.champ)?.key }));
+        const recommendations = recs.slice(0, top).map((r) => ({ champ: r.champ, name: nm(r.champ), key: c.names.get(r.champ)?.key, class: classOf.get(r.champ), p: r.p, lo: r.lo, hi: r.hi,
+          contributions: r.contributions.filter((x) => x.kind === "strength" || Math.abs(x.logOdds) >= 0.005).map((x) => ({ ...x, vsName: x.vs ? nm(x.vs) : undefined })),
+          threats: r.threats.map((t) => ({ ...t, name: nm(t.champ) })) }));
+
+        // SPEC-05 §2: prospective reality check — store what was recommended, resolve the outcome later.
+        let logId: number | undefined;
+        if (body.log === true && state.myPuuid) {
+          const stored = recs.slice(0, 10).map((r) => ({ champ: r.champ, p: r.p, lo: r.lo, hi: r.hi, class: classOf.get(r.champ) }));
+          const row = await opts.pool.query<{ id: string }>(
+            `insert into recommendation_log(source, patch, tier_band, puuid, my_pos, state, recommended)
+             values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+            [typeof body.source === "string" ? body.source.slice(0, 16) : "web", c.patch, src.scope.tierBand,
+             state.myPuuid, state.myPos, JSON.stringify({ allies: state.allies, enemies: state.enemies, bans: state.bans }), JSON.stringify(stored)]);
+          logId = Number(row.rows[0]!.id);
+        }
+
         return json(res, 200, {
           patch: c.patch, band: src.scope.tierBand ?? "all", myPos: state.myPos, candidates: recs.length, enemyPositions,
-          recommendations: recs.slice(0, top).map((r) => ({ champ: r.champ, name: nm(r.champ), key: c.names.get(r.champ)?.key, class: classOf.get(r.champ), p: r.p, lo: r.lo, hi: r.hi,
-            contributions: r.contributions.filter((x) => x.kind === "strength" || Math.abs(x.logOdds) >= 0.005).map((x) => ({ ...x, vsName: x.vs ? nm(x.vs) : undefined })),
-            threats: r.threats.map((t) => ({ ...t, name: nm(t.champ) })) })),
-          bans,
+          recommendations, bans, ...(logId === undefined ? {} : { logId }),
         });
+      }
+
+      // SPEC-05 §2: which champion the player actually locked for a logged recommendation.
+      if (url.pathname === "/api/recommendation/chosen" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        if (!Number.isInteger(body.logId) || !Number.isInteger(body.champ)) return json(res, 400, { error: "logId and champ must be integers" });
+        const r = await opts.pool.query(`update recommendation_log set chosen = $2 where id = $1 and chosen is null`, [body.logId, body.champ]);
+        return json(res, 200, { updated: r.rowCount ?? 0 });
       }
 
       if (url.pathname.startsWith("/api/champion/")) {

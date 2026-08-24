@@ -5,6 +5,7 @@ import { ddragonSync } from "./ddragonSync.ts";
 import { seedPlayers } from "./seed.ts";
 import { crawl } from "./crawler.ts";
 import { lookupTiers } from "./lookupTiers.ts";
+import { prospectiveSummary, resolveLogs } from "./resolveLogs.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = resolve(here, "../../../infra/migrations");
@@ -15,6 +16,8 @@ const USAGE = `usage: cli.ts <command> [options]
   seed [--pages N]        fill seed_player from the ranked ladder (default 2 pages per tier)
   crawl [--max N]         crawl matches into the DB (default: until exhausted)
   tiers [--limit N]       fill tier for snowballed players
+  bands                   infer a tier band for each match from its known participants
+  resolve-logs            link logged recommendations to the game that followed
   stats                   print row counts`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -60,6 +63,20 @@ async function main(argv: string[]) {
       case "tiers":
         await lookupTiers(pool, riot(), cfg.platforms, Number(arg(argv, "--limit") ?? 200));
         break;
+      case "bands": {
+        const r = await pool.query<{ n: number }>(`select infer_match_bands() as n`);
+        const dist = await pool.query(`select tier_band, count(*)::int n from match group by 1 order by 2 desc`);
+        console.log(`matches updated: ${r.rows[0]!.n}`);
+        console.table(dist.rows);
+        break;
+      }
+      case "resolve-logs": {
+        await resolveLogs(pool);
+        const s = await prospectiveSummary(pool);
+        console.table([s.totals]);
+        if (s.byClass.length) console.table(s.byClass);
+        break;
+      }
       case "stats": {
         const q = await pool.query(`
           select (select count(*) from seed_player) seeds,

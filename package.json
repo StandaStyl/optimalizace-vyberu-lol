@@ -21,7 +21,9 @@
     "model:score": "node --experimental-strip-types apps/model/src/cli.ts score",
     "model:eval": "node --experimental-strip-types apps/model/src/cli.ts eval",
     "api": "node --experimental-strip-types apps/api/src/index.ts",
-    "model:replay": "node --experimental-strip-types apps/model/src/cli.ts replay"
+    "model:replay": "node --experimental-strip-types apps/model/src/cli.ts replay",
+    "lcu": "node --experimental-strip-types apps/desktop/src/index.ts",
+    "resolve-logs": "node --experimental-strip-types apps/ingest/src/cli.ts resolve-logs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

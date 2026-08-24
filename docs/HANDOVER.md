@@ -97,6 +97,9 @@ cd C:\Users\zaluz\Projekty\draft-advisor
 | Doporučení z CLI | `npm run model:score -- --pos BOTTOM --enemies 51,412 --allies 40:UTILITY` |
 | Holdout evaluace | `npm run model:eval -- --cutoff-days 3 [--grid] [--persist]` |
 | Kontrola reality | `npm run model:replay -- --cutoff-days 2 [--games N] [--persist]` |
+| Pásma zápasů | `... cli.ts bands` (po každém větším crawlu) |
+| Spárování logů s výsledky | `npm run resolve-logs` |
+| Konektor herního klienta | `npm run lcu` (čte champ select, jen zobrazuje) |
 | Testy / typy / lint | `npx vitest run` · `npx tsc -b` · `npx eslint .` |
 
 API: `GET /api/champions`, `GET /api/champion/:id?band=`, `GET /api/profile?riotId=Jméno%23TAG`,
@@ -127,8 +130,17 @@ Známé mezery / co dál:
    rovná `logit(pBlue)` na 6 desetinných míst, prohození týmů dá součet přesně 1,0, prázdný
    draft 0,5. **Statistická úloha → řešit na Fable 5**, ideálně spolu s laděním `priorNSynergy`
    v `model:eval --grid`.
-5. Hosting (VPS/Fly), Node LCU konektor — v tomto pořadí (SPEC-04).
-6. H5 (trojice) — netestováno.
+5. **Tierová pásma: rozhodnout, co použít v modelu.** Vyhledáním přes League-V4 má pásmo jen
+   ~2 000 hráčů (5 % účastníků), takže pásmové modely stály skoro na ničem. Migrace 0008 přidala
+   `match.tier_band` odvozené většinou ze známých účastníků — pokrytí vzrostlo na ~45 % zápasů
+   (low 3 008, mid 4 764, high 2 014). Opora: kde byli známí aspoň dva hráči, pásma se shodla
+   v 93 % (113 zápasů, 8 konfliktů). **Agregáty to zatím nepoužívají** — přepnutí `agg_*` z
+   `participant.tier_band` na `match.tier_band` je modelové rozhodnutí → Fable 5. Bez toho
+   nelze testovat H3.
+6. Hosting (VPS/Fly) — zbývá (SPEC-04).
+7. H5 (trojice) — netestováno.
+8. LCU konektor je napsaný a otestovaný jednotkově, ale **nikdy neběžel proti živému klientu** —
+   při prvním ostrém spuštění ověřit, že `assignedPosition`, `actions` a `bans` mají očekávaný tvar.
 
 ## 6. Pasti, které už stály čas
 

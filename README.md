@@ -26,7 +26,7 @@ apps/ingest       crawler + Data Dragon sync + CLI
 apps/model        posteriors, scoring, position inference, evaluation   (phase 2–3)
 apps/api          HTTP API (node:http, no framework) + serves apps/web/public
 apps/web/public   static UI: draft simulator, player page, model evaluation page
-apps/desktop      Node LCU connector                                     (planned)
+apps/desktop      Node connector reading the League client champion select
 infra/migrations  SQL, applied in lexical order by `npm run db:migrate`
 ```
 
@@ -43,7 +43,8 @@ npm run api               # http://localhost:8787
 ```
 
 API: `GET /api/champions`, `POST /api/score {myPos, allies[], enemies[], bans[], band?, myPuuid?}`,
-`POST /api/winprob {blue[], red[]}` (vraci pBlue, byVariant, terms, impact), `GET /api/player/:puuid`, `GET /api/model/eval`, `GET /api/health`.
+`POST /api/winprob {blue[], red[]}` (vraci pBlue, byVariant, terms, impact), `GET /api/player/:puuid`, `GET /api/model/eval`, `GET /api/model/replay`, `GET /api/profile?riotId=`,
+`POST /api/recommendation/chosen`, `POST /api/player/delete`, `GET /api/health`.
 
 Requires Node ≥ 22 (uses `--experimental-strip-types`; no build step for scripts).
 
