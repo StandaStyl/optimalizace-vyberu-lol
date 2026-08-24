@@ -40,3 +40,11 @@ td.champ img{width:28px;height:28px;border-radius:4px}
 .results-head{display:flex;justify-content:space-between;align-items:baseline}
 .calib{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-top:12px;max-width:600px}
 .calib div{background:var(--soft);padding:6px 4px;font-size:.75rem;text-align:center;border-radius:3px}
+.wp-big{font:700 2.4rem Literata,Georgia,serif;font-variant-numeric:tabular-nums;color:var(--accent)}
+.wp-bar{display:flex;height:20px;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:8px 0 12px}
+.wp-bar i{display:block;height:100%}
+.wp-bar i.b{background:var(--accent)}
+.wp-bar i.r{background:var(--bad)}
+.team-h{font:700 1rem Literata,Georgia,serif;margin:0 0 6px;padding-left:8px;border-left:4px solid var(--line)}
+.team-h.blue{border-left-color:var(--accent)}
+.team-h.red{border-left-color:var(--bad)}

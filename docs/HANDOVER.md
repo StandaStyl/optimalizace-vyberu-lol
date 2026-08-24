@@ -119,8 +119,16 @@ Známé mezery / co dál:
 2. **Winner's curse** — replay ukázal, že u top-1 doporučení model predikuje ~55 %, realita ~52 %.
    Potřebuje korekci (návrh: shrinkage přes kandidáty). Statistická úloha → **jen na Fable 5**.
 3. **Budoucí členy nejsou v MC intervalu** — jsou to zatím deterministická očekávání.
-4. Winprob celého draftu v UI, hosting (VPS/Fly), Node LCU konektor — v tomto pořadí (SPEC-04).
-5. H5 (trojice) — netestováno.
+4. **K ověření: synergický člen dominuje.** Na testovacím 5v5 draftu (24. 8., ~20 k her) vyšlo
+   síla +1,8 p.b., matchupy +2,1 p.b., ale **synergie −10,1 p.b.** Deset dvojic v týmu se sčítá,
+   takže i malé odchylky dají velký součet. Může jít o reálný efekt, nebo o systematické
+   zkreslení (podezřelý je baseline `sigmoid((logit sA + logit sB)/2)` a možnost, že se týmový
+   efekt počítá vícekrát přes překrývající se dvojice). Plumbing je ověřený: součet členů se
+   rovná `logit(pBlue)` na 6 desetinných míst, prohození týmů dá součet přesně 1,0, prázdný
+   draft 0,5. **Statistická úloha → řešit na Fable 5**, ideálně spolu s laděním `priorNSynergy`
+   v `model:eval --grid`.
+5. Hosting (VPS/Fly), Node LCU konektor — v tomto pořadí (SPEC-04).
+6. H5 (trojice) — netestováno.
 
 ## 6. Pasti, které už stály čas
 

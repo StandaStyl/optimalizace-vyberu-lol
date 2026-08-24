@@ -18,6 +18,8 @@ async function init() {
   buildSlots("#allies", 4, true);
   buildSlots("#enemies", 5, false);
   buildSlots("#bans", 10, null);
+  buildTeamSlots("#wpBlue");
+  buildTeamSlots("#wpRed");
   document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
     document.querySelectorAll("nav button, .tab").forEach((x) => x.classList.remove("active"));
     b.classList.add("active"); $("#tab-" + b.dataset.tab).classList.add("active");
@@ -28,10 +30,12 @@ async function init() {
   $("#riotId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadPlayer(); });
   $("#champName").addEventListener("change", loadChampion);
   $("#champBand").addEventListener("change", loadChampion);
+  $("#wpBand").addEventListener("change", winprob);
+  $("#wpFromDraft").addEventListener("click", fillTeamsFromDraft);
   score();
 }
 
-function buildSlots(sel, n, withPos) {
+function buildSlots(sel, n, withPos, onChange = score) {
   const el = $(sel);
   el.innerHTML = "";
   for (let i = 0; i < n; i++) {
@@ -40,10 +44,16 @@ function buildSlots(sel, n, withPos) {
     row.innerHTML = `<img alt=""><input list="champList" placeholder="${withPos === null ? "ban" : "šampion"}">` +
       (withPos === null ? "" : `<select><option value="">${withPos ? "pozice" : "odhad"}</option>${POS.map((p) => `<option value="${p}">${POS_CS[p]}</option>`).join("")}</select>`);
     const input = row.querySelector("input");
-    input.addEventListener("change", () => { const c = byName.get(input.value.trim().toLowerCase()); row.querySelector("img").src = c ? icon(c.key) : ""; score(); });
-    row.querySelector("select")?.addEventListener("change", score);
+    input.addEventListener("change", () => { const c = byName.get(input.value.trim().toLowerCase()); row.querySelector("img").src = c ? icon(c.key) : ""; onChange(); });
+    row.querySelector("select")?.addEventListener("change", onChange);
     el.appendChild(row);
   }
+}
+
+/** Five slots with the five positions preselected — a full team line-up. */
+function buildTeamSlots(sel) {
+  buildSlots(sel, 5, true, winprob);
+  [...$(sel).querySelectorAll(".slot")].forEach((row, i) => { row.querySelector("select").value = POS[i]; });
 }
 
 function readSlots(sel) {
@@ -104,6 +114,49 @@ async function loadChampion() {
   $("#champBody").innerHTML = r.byPosition.map((b) => `<div class="panel" style="margin-top:12px"><h2>${r.name} na pozici ${POS_CS[b.pos]}</h2>
     ${block("Vítězí proti (nejlepší matchupy)", b.counters)}${block("Prohrává proti (nejhorší matchupy)", b.countered)}
     ${block("Nejlepší synergie", b.synergies)}${block("Nejhorší synergie", b.antiSynergies)}</div>`).join("") || "<p class=hint>šampion nemá na žádné pozici dost her</p>";
+}
+
+const TERM_CS = { strength: "Síla šampionů na pozicích", matchup: "Matchupy (napříč pozicemi)", synergy: "Synergie uvnitř týmů", player: "Historie hráčů" };
+
+/** Copy the draft tab into the two team line-ups; slots without a known position stay empty. */
+function fillTeamsFromDraft() {
+  const setTeam = (sel, slots) => {
+    const rows = [...$(sel).querySelectorAll(".slot")];
+    rows.forEach((row, i) => { row.querySelector("input").value = ""; row.querySelector("img").src = ""; row.querySelector("select").value = POS[i]; });
+    slots.forEach((s) => {
+      const row = rows[POS.indexOf(s.pos)];
+      if (!s.pos || !row) return;
+      const c = champs.find((x) => x.id === s.champ);
+      if (!c) return;
+      row.querySelector("input").value = c.name;
+      row.querySelector("img").src = icon(c.key);
+    });
+  };
+  setTeam("#wpBlue", readSlots("#allies"));
+  setTeam("#wpRed", readSlots("#enemies"));
+  $("#wpBand").value = $("#band").value;
+  winprob();
+}
+
+let wpTimer;
+function winprob() { clearTimeout(wpTimer); wpTimer = setTimeout(doWinprob, 150); }
+async function doWinprob() {
+  const blue = readSlots("#wpBlue").filter((s) => s.pos);
+  const red = readSlots("#wpRed").filter((s) => s.pos);
+  if (!blue.length && !red.length) { $("#wpResult").innerHTML = '<p class="hint">Zadejte šampiony obou týmů (nebo je převezměte z draftu).</p>'; return; }
+  const r = await fetch("/api/winprob", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blue, red, band: $("#wpBand").value }) }).then((x) => x.json());
+  if (r.error) { $("#wpResult").innerHTML = `<p class="hint">Chyba: ${r.error}</p>`; return; }
+  const pc = (v) => (v * 100).toFixed(1) + " %";
+  const pbs = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + " p.b.";
+  const b = (r.pBlue * 100).toFixed(1), rd = (100 - r.pBlue * 100).toFixed(1);
+  $("#wpResult").innerHTML = `
+    <p><span class="wp-big">${b} %</span> <span class="hint">šance modrých · červení ${rd} %</span></p>
+    <div class="wp-bar"><i class="b" style="width:${b}%"></i><i class="r" style="width:${rd}%"></i></div>
+    <p class="hint">patch ${r.patch} · pásmo ${r.band} · obsazeno modří ${r.blue}/5, červení ${r.red}/5${r.blue < 5 || r.red < 5 ? " — neobsazené pozice se nezapočítávají" : ""}</p>
+    <table><thead><tr><th>Člen modelu</th><th>log‑odds (kladné = pro modré)</th><th>Dopad na šanci</th></tr></thead><tbody>
+      ${Object.entries(r.terms).map(([k, v]) => `<tr><td>${TERM_CS[k] ?? k}</td><td><span class="term ${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(3)}</span></td><td>${pbs(r.impact[k])}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="hint">Varianty modelu: jen síla ${pc(r.byVariant.strength)} · párový (bez hráčů) ${pc(r.byVariant.pairwise)} · plný ${pc(r.byVariant.full)}</p>`;
 }
 
 async function loadReplay() {

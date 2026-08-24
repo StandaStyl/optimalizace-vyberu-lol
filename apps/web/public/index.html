@@ -14,6 +14,7 @@
     <button data-tab="draft" class="active">Draft</button>
     <button data-tab="player">Hráč</button>
     <button data-tab="champion">Šampion</button>
+    <button data-tab="teams">Oba týmy</button>
     <button data-tab="model">Model</button>
   </nav>
   <div class="meta" id="meta">načítám…</div>
@@ -68,6 +69,22 @@
     <div id="champHead"></div>
     <div id="champBody"></div>
   </div>
+</section>
+
+<section id="tab-teams" class="tab">
+  <div class="panel">
+    <h2>Šance celého draftu</h2>
+    <p class="hint">Zadejte oba týmy včetně pozic. Šance se počítá ze stejných členů jako doporučení pro jednotlivce, jen symetricky pro obě strany.</p>
+    <label>Tierové pásmo
+      <select id="wpBand"><option value="all">vše</option><option value="low">Iron–Gold</option><option value="mid">Platinum–Emerald</option><option value="high">Diamond+</option></select>
+      <button id="wpFromDraft" type="button">Převzít z draftu</button>
+    </label>
+    <div class="draft-grid">
+      <div><h3 class="team-h blue">Modrý tým</h3><div id="wpBlue" class="slots"></div></div>
+      <div><h3 class="team-h red">Červený tým</h3><div id="wpRed" class="slots"></div></div>
+    </div>
+  </div>
+  <div class="panel"><div id="wpResult"></div></div>
 </section>
 
 <section id="tab-model" class="tab">

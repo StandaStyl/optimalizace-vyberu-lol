@@ -4,7 +4,7 @@ import { extname, join, normalize } from "node:path";
 import type pg from "pg";
 import { POSITIONS, type Platform, type Position, type RiotClient, type TierBand } from "@da/core";
 import { resolveProfile } from "./profile.ts";
-import { championPage, DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot } from "@da/model";
+import { championPage, DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamLogit, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot, type TermWeights } from "@da/model";
 
 export interface ApiOptions {
   pool: pg.Pool;
@@ -113,7 +113,25 @@ export function createApi(opts: ApiOptions) {
         const team = (xs: unknown): TeamSlot[] => parseSlots(xs).filter((s): s is TeamSlot => !!s.pos);
         const blue = team(body.blue), red = team(body.red);
         for (const s of [...blue, ...red]) if (s.puuid) await src.preloadPlayer(s.puuid);
-        return json(res, 200, { patch: c.patch, blue: blue.length, red: red.length, pBlue: teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.full), pBluePairwise: teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.pairwise) });
+        const kinds = ["strength", "matchup", "synergy", "player"] as const;
+        // The model is additive in log-odds, so each term's own contribution is exact.
+        const terms = Object.fromEntries(kinds.map((k) => {
+          const w: TermWeights = { strength: 0, matchup: 0, synergy: 0, player: 0 };
+          w[k] = 1;
+          return [k, teamLogit(blue, red, src, DEFAULT_PARAMS, w)];
+        }));
+        // Impact in probability points: full model minus the same model without that term.
+        const pFull = teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.full);
+        const impact = Object.fromEntries(kinds.map((k) => {
+          const w: TermWeights = { ...VARIANTS.full };
+          w[k] = 0;
+          return [k, pFull - teamWinProb(blue, red, src, DEFAULT_PARAMS, w)];
+        }));
+        const byVariant = Object.fromEntries(Object.entries(VARIANTS).map(([k, w]) => [k, teamWinProb(blue, red, src, DEFAULT_PARAMS, w)]));
+        return json(res, 200, {
+          patch: c.patch, band: src.scope.tierBand ?? "all", blue: blue.length, red: red.length,
+          pBlue: pFull, pBluePairwise: byVariant.pairwise, byVariant, terms, impact,
+        });
       }
 
       // SPEC-02: delete my data — irreversible anonymisation of a puuid across all tables.

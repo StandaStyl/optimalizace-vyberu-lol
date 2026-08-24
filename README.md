@@ -43,7 +43,7 @@ npm run api               # http://localhost:8787
 ```
 
 API: `GET /api/champions`, `POST /api/score {myPos, allies[], enemies[], bans[], band?, myPuuid?}`,
-`POST /api/winprob {blue[], red[]}`, `GET /api/player/:puuid`, `GET /api/model/eval`, `GET /api/health`.
+`POST /api/winprob {blue[], red[]}` (vraci pBlue, byVariant, terms, impact), `GET /api/player/:puuid`, `GET /api/model/eval`, `GET /api/health`.
 
 Requires Node ≥ 22 (uses `--experimental-strip-types`; no build step for scripts).
 
