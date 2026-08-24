@@ -137,7 +137,8 @@ Známé mezery / co dál:
    v 93 % (113 zápasů, 8 konfliktů). **Agregáty to zatím nepoužívají** — přepnutí `agg_*` z
    `participant.tier_band` na `match.tier_band` je modelové rozhodnutí → Fable 5. Bez toho
    nelze testovat H3.
-6. Hosting (VPS/Fly) — zbývá (SPEC-04).
+6. Hosting — artefakty hotové (`Dockerfile`, `fly.toml`, [`docs/deploy.md`](deploy.md)); zbývá
+   samotné nasazení, které potřebuje účet na Fly a production Riot key.
 7. H5 (trojice) — netestováno.
 8. LCU konektor je napsaný a otestovaný jednotkově, ale **nikdy neběžel proti živému klientu** —
    při prvním ostrém spuštění ověřit, že `assignedPosition`, `actions` a `bans` mají očekávaný tvar.

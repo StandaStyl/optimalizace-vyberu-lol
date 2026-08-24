@@ -3,6 +3,7 @@
 > Pravidlo Jana: každá chyba, ze které plyne poučení, se zapíše — co se stalo, proč,
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
+
 ## 24. 8. 2026 — Rozdělené vlastnictví tabulek: migrace přes MCP vs. přes aplikaci
 
 **Co se stalo:** tabulky z migrací 0001 a 0002 vznikly přes Supabase MCP (vlastník `postgres`),

@@ -18,6 +18,7 @@ const USAGE = `usage: cli.ts <command> [options]
   tiers [--limit N]       fill tier for snowballed players
   bands                   infer a tier band for each match from its known participants
   resolve-logs            link logged recommendations to the game that followed
+  worker [--batch N]      long-running cycle: crawl a batch, then bands + aggregates + logs
   stats                   print row counts`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -68,6 +69,21 @@ async function main(argv: string[]) {
         const dist = await pool.query(`select tier_band, count(*)::int n from match group by 1 order by 2 desc`);
         console.log(`matches updated: ${r.rows[0]!.n}`);
         console.table(dist.rows);
+        break;
+      }
+      case "worker": {
+        // One long-running process for hosting: crawl a batch, then keep the derived data fresh.
+        const batch = Number(arg(argv, "--batch") ?? 2000);
+        let stop = false;
+        for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { console.log(`${sig} — dokončuji dávku a končím`); stop = true; });
+        while (!stop) {
+          const r = await crawl(pool, riot(), { platforms: cfg.platforms, queueId: cfg.QUEUE_ID, maxMatches: batch });
+          console.log(`batch: stored ${r.stored}, failed ${r.failed}`);
+          await pool.query(`select infer_match_bands()`);
+          await pool.query(`select refresh_aggregates()`);
+          await resolveLogs(pool);
+          if (r.stored === 0) { console.log("nic nového, pauza 5 min"); await new Promise((s) => setTimeout(s, 300_000)); }
+        }
         break;
       }
       case "resolve-logs": {
