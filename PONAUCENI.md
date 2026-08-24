@@ -3,6 +3,20 @@
 > Pravidlo Jana: každá chyba, ze které plyne poučení, se zapíše — co se stalo, proč,
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
+## 24. 8. 2026 — Rozdělené vlastnictví tabulek: migrace přes MCP vs. přes aplikaci
+
+**Co se stalo:** tabulky z migrací 0001 a 0002 vznikly přes Supabase MCP (vlastník `postgres`),
+tabulky z 0003+ přes `npm run db:migrate` (vlastník `draft_ingest`). Migrace 0008 chtěla
+`alter table match add column ...` a spadla na „must be owner of table match". Oprava přes MCP
+zase spadla na „must be able to SET ROLE draft_ingest" — role `postgres` nebyla členem
+`draft_ingest`, a `ALTER ... OWNER TO` členství vyžaduje.
+
+**Řešení:** jednorázově `grant draft_ingest to current_user;` a pak `alter table ... owner to
+draft_ingest;` pro všechny tabulky, typy i sekvence; od té chvíle vlastní schéma jediná role.
+Pravidlo do budoucna: **schéma měnit jen jednou cestou** — migrací v repu. MCP používat na čtení
+a nanejvýš na bootstrap, než funguje lokální připojení; pokud se přes MCP přece jen něco vytvoří,
+hned předat vlastnictví aplikační roli.
+
 
 ## 24. 8. 2026 — `Move-Item node_modules` prošel přes workspace odkazy a SMAZAL ZDROJÁKY
 
