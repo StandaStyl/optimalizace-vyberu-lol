@@ -45,9 +45,19 @@ Health check `/api/health` vrací `ok` i před dokončením zahřátí agregát�
 
 ## Náklady
 
-Dva stroje `shared-cpu-1x` (1 GB + 512 MB) vycházejí zhruba na 5–8 USD/měsíc. Supabase free tier
-stačí do ~500 MB dat; při ~180 tis. řádků `participant` na patch je to řádově 3–4 patche.
-Pak buď mazat staré patche, nebo Supabase Pro (25 USD/měsíc).
+Dva stroje `shared-cpu-1x` (1 GB + 512 MB) vycházejí zhruba na 5–8 USD/měsíc.
+
+Supabase free tier má 500 MB. **Změřeno 24. 8. 2026: 21 640 zápasů = 216 MB**, tedy zhruba
+10 kB na zápas — free tier pojme řádově **50 000 zápasů, což je jeden plně nacrawlovaný patch**.
+Průběžně proto mazat starší patche:
+
+```bash
+node --experimental-strip-types apps/ingest/src/cli.ts prune              # zkušební běh
+node --experimental-strip-types apps/ingest/src/cli.ts prune --yes        # ponechá 1 patch
+```
+
+`prune` maže po patchích (účastníci a bany jdou kaskádou) a na závěr dělá `vacuum full`, bez
+kterého se místo souboru nevrátí. Alternativa je Supabase Pro (25 USD/měsíc, 8 GB).
 
 ## Před spuštěním pro veřejnost
 

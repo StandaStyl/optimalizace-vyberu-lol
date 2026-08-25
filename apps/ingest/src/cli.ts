@@ -6,6 +6,8 @@ import { seedPlayers } from "./seed.ts";
 import { crawl, ExpiredKeyError } from "./crawler.ts";
 import { lookupTiers } from "./lookupTiers.ts";
 import { prospectiveSummary, resolveLogs } from "./resolveLogs.ts";
+import { status } from "./status.ts";
+import { prune } from "./prune.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = resolve(here, "../../../infra/migrations");
@@ -19,7 +21,9 @@ const USAGE = `usage: cli.ts <command> [options]
   bands                   infer a tier band for each match from its known participants
   resolve-logs            link logged recommendations to the game that followed
   worker [--batch N]      long-running cycle: crawl a batch, then bands + aggregates + logs
-  stats                   print row counts`;
+  stats                   print row counts
+  status                  check API, crawler, Riot key and data freshness at once
+  prune [--keep-patches N] [--queue-days N] [--yes]   free space; dry run unless --yes`;
 
 function arg(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(name);
@@ -97,6 +101,20 @@ async function main(argv: string[]) {
         const s = await prospectiveSummary(pool);
         console.table([s.totals]);
         if (s.byClass.length) console.table(s.byClass);
+        break;
+      }
+      case "prune": {
+        await prune(pool, {
+          keepPatches: Number(arg(argv, "--keep-patches") ?? 1),
+          queueOlderThanDays: Number(arg(argv, "--queue-days") ?? 7),
+          apply: argv.includes("--yes"),
+        });
+        break;
+      }
+      case "status": {
+        const checks = await status(pool, cfg, resolve(here, "../../.."));
+        for (const c of checks) console.log(`${c.ok ? "OK   " : "CHYBA"} ${c.name.padEnd(14)} ${c.detail}`);
+        if (checks.some((c) => !c.ok)) process.exitCode = 1;
         break;
       }
       case "stats": {

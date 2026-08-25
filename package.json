@@ -23,7 +23,8 @@
     "api": "node --experimental-strip-types apps/api/src/index.ts",
     "model:replay": "node --experimental-strip-types apps/model/src/cli.ts replay",
     "lcu": "node --experimental-strip-types apps/desktop/src/index.ts",
-    "resolve-logs": "node --experimental-strip-types apps/ingest/src/cli.ts resolve-logs"
+    "resolve-logs": "node --experimental-strip-types apps/ingest/src/cli.ts resolve-logs",
+    "status": "node --experimental-strip-types apps/ingest/src/cli.ts status"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

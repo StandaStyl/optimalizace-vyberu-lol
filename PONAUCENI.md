@@ -4,6 +4,20 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 24. 8. 2026 — Odpojené procesy umřely tiše; měření latence ukázalo odmítnuté spojení jako „latenci"
+
+**Co se stalo:** crawler i API spuštěné přes `Start-Process` skončily bez jediného řádku
+v chybovém logu. Následné měření `curl -s -o /dev/null -w "%{time_total}s"` vrátilo u všech
+endpointů shodných ~2,25 s a já to přečetl jako latenci aplikace — přitom to byl čas, než
+curl vzdal spojení s mrtvým serverem. Po restartu vyšla skutečná čísla: health 1–4 ms,
+`/api/score` 81–105 ms.
+
+**Řešení:** přidán `npm run status` (`cli.ts status`), který naráz ověří API přes `/api/health`,
+existenci obou PID, platnost Riot klíče, velikost DB a stáří posledního zápasu; při jakékoli
+chybě končí exit code 1. Pravidlo k měření: **do `curl -w` vždy přidat `%{http_code}`** —
+bez něj se selhání tváří jako pomalá odpověď. A po každém delším bloku práce zkontrolovat,
+že procesy na pozadí opravdu žijí; ticho v logu není důkaz, že běží.
+
 ## 24. 8. 2026 — Expirovaný Riot klíč: crawler tiše skončil s klamnou hláškou
 
 **Co se stalo:** dev klíč expiroval uprostřed běhu. Každý požadavek začal vracet 401, ale

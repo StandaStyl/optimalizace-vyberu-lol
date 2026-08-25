@@ -65,10 +65,13 @@ cd C:\Users\zaluz\Projekty\draft-advisor
    Musí vrátit `200`. (Trvale to řeší production key — žádost je připravená
    v [`riot-production-key.md`](riot-production-key.md), odeslat až bude demo na veřejné URL.)
 
-2. **Stav dat**
+2. **Stav všeho** — jeden příkaz místo ručního proklikávání:
    ```bash
-   node --experimental-strip-types apps/ingest/src/cli.ts stats
+   npm run status
    ```
+   Ověří API, oba procesy na pozadí, platnost Riot klíče, velikost DB a jak stará jsou data.
+   Procesy na pozadí už dvakrát umřely tiše (prázdný `data/*.err`), takže ticho v logu
+   není důkaz, že běží.
 
 3. **Crawler a API na pozadí** (PowerShell, PID bez BOM):
    ```powershell
@@ -100,6 +103,8 @@ cd C:\Users\zaluz\Projekty\draft-advisor
 | Pásma zápasů | `... cli.ts bands` (po každém větším crawlu) |
 | Spárování logů s výsledky | `npm run resolve-logs` |
 | Konektor herního klienta | `npm run lcu` (čte champ select, jen zobrazuje) |
+| **Kontrola, že vše běží** | **`npm run status`** — API, oba procesy, Riot klíč, velikost DB, stáří dat |
+| Uvolnění místa v DB | `... cli.ts prune [--keep-patches N]` (zkušebně) · `--yes` (opravdu smaže) |
 | Testy / typy / lint | `npx vitest run` · `npx tsc -b` · `npx eslint .` |
 
 API: `GET /api/champions`, `GET /api/champion/:id?band=`, `GET /api/profile?riotId=Jméno%23TAG`,
