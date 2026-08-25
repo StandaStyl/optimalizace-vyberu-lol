@@ -81,13 +81,21 @@ async function doScore() {
   const pct = (v) => ((v - min) / (max - min) * 100).toFixed(1);
   $("#recs tbody").innerHTML = r.recommendations.map((x) => `<tr>
     <td><span class="cls c${x.class}">${x.class}</span></td>
-    <td class="champ"><img src="${icon(x.key)}" alt="">${x.name}</td>
+    <td class="champ"><img src="${icon(x.key)}" alt=""><a href="#" class="champ-link" data-name="${x.name}">${x.name}</a></td>
     <td><b>${(x.p * 100).toFixed(1)} %</b></td>
     <td><span class="bar"><i style="left:${pct(x.lo)}%;width:${(pct(x.hi) - pct(x.lo)).toFixed(1)}%"></i><b style="left:${pct(x.p)}%"></b></span>${(x.lo * 100).toFixed(1)}–${(x.hi * 100).toFixed(1)}</td>
     <td>${x.contributions.find((c) => c.kind === "strength")?.games ?? 0}</td>
     <td>${x.contributions.filter((c) => c.kind !== "strength").map((c) => `<span class="term ${c.logOdds >= 0 ? "pos" : "neg"}" title="${c.games} her">${KIND[c.kind]} ${c.vsName ?? ""}${c.vsPos ? " " + POS_CS[c.vsPos] : ""} ${c.logOdds >= 0 ? "+" : ""}${c.logOdds.toFixed(2)}</span>`).join("")}</td>
     <td>${(x.threats || []).slice(0, 3).map((t) => `<span class="term neg" title="pick ${Math.round(t.pPick * 100)} %">${t.name} ${POS_CS[t.pos]} ${t.logOdds.toFixed(2)}</span>`).join("")}</td>
   </tr>`).join("");
+  // Champion name jumps to its page — the numbers behind a recommendation are one click away.
+  $("#recs").querySelectorAll(".champ-link").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    $("#champName").value = a.dataset.name;
+    $("#champBand").value = $("#band").value;
+    document.querySelector('nav button[data-tab="champion"]').click();
+    loadChampion();
+  }));
 }
 
 async function loadPlayer() {
@@ -170,8 +178,20 @@ async function loadReplay() {
     <table><thead><tr><th>Známých soupeřů</th><th>n</th><th>přesnost odhadu pozic (H4)</th></tr></thead><tbody>${rep.positionAccuracy.map((p) => `<tr><td>${p.knownEnemies}</td><td>${p.n}</td><td>${pc(p.accuracy)}</td></tr>`).join("")}</tbody></table>`;
 }
 
+async function loadProspective() {
+  const r = await fetch("/api/model/prospective").then((x) => x.json());
+  if (r.error) { $("#prospective").innerHTML = `<p class="hint">${r.error}</p>`; return; }
+  const t = r.totals;
+  const head = `<p>Zaznamenaných doporučení: <b>${t.logged}</b> · z toho s vybraným šampionem: <b>${t.with_choice}</b> · s dohledaným výsledkem: <b>${t.resolved}</b>${t.resolved ? ` (výher ${t.wins})` : ""}</p>`;
+  const table = r.byClass.length
+    ? `<table><thead><tr><th>Třída doporučení</th><th>Her</th><th>Výher</th><th>WR</th></tr></thead><tbody>${r.byClass.map((b) => `<tr><td><span class="cls c${b.cls}">${b.cls}</span></td><td>${b.n}</td><td>${b.wins}</td><td>${((100 * b.wins) / b.n).toFixed(1)} %</td></tr>`).join("")}</tbody></table>`
+    : `<p class="hint">Zatím žádná dohraná hra k vyhodnocení — spusť konektor (<code>npm run lcu</code>) a odehraj ranked zápas.</p>`;
+  $("#prospective").innerHTML = head + table;
+}
+
 async function loadModel() {
   loadReplay();
+  loadProspective();
   const r = await fetch("/api/model/eval").then((x) => x.json());
   $("#dataSummary").innerHTML = "<p>Data: " + r.data.map((d) => `<b>${d.patch}</b> ${d.games} her (${new Date(d.first).toLocaleDateString("cs")} – ${new Date(d.last).toLocaleDateString("cs")})`).join(" · ") + "</p>";
   $("#evalTable tbody").innerHTML = r.runs.map((e) => `<tr><td>${e.run_id}</td><td>${e.patch}</td><td>${e.tier_band ?? "vše"}</td><td>${e.baseline}</td><td>${e.n_games}</td><td>${Number(e.logloss).toFixed(4)}</td><td>${Number(e.brier).toFixed(4)}</td><td>${Number(e.auc).toFixed(3)}</td><td>${Number(e.ece).toFixed(3)}</td></tr>`).join("") || "<tr><td colspan=9>zatím žádná evaluace</td></tr>";

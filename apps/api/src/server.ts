@@ -186,6 +186,23 @@ export function createApi(opts: ApiOptions) {
         return json(res, 200, { runs: rows });
       }
 
+      // SPEC-05 §2: how recommendations that were actually followed turned out.
+      if (url.pathname === "/api/model/prospective") {
+        const totals = (await opts.pool.query(
+          `select count(*)::int logged,
+                  count(*) filter (where chosen is not null)::int with_choice,
+                  count(*) filter (where match_id is not null)::int resolved,
+                  count(*) filter (where win)::int wins
+             from recommendation_log`)).rows[0];
+        const byClass = (await opts.pool.query(
+          `select (r->>'class')::int as cls, count(*)::int n, sum(case when l.win then 1 else 0 end)::int wins
+             from recommendation_log l
+             cross join lateral jsonb_array_elements(l.recommended) r
+            where l.match_id is not null and (r->>'champ')::int = l.chosen
+            group by 1 order by 1`)).rows;
+        return json(res, 200, { totals, byClass });
+      }
+
       if (url.pathname === "/api/model/eval") {
         const rows = (await opts.pool.query(`select r.run_id, r.patch, r.tier_band, r.params, r.created_at, e.split, e.baseline, e.n_games, e.logloss, e.brier, e.auc, e.ece, e.calibration
           from model_run r join model_eval e using (run_id) order by r.run_id desc, e.baseline limit 80`)).rows;
