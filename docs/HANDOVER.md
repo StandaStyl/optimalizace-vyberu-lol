@@ -124,8 +124,14 @@ Hotovo: fáze 0–4 + SPEC-06.
 Známé mezery / co dál:
 1. **Ostrá validace** — spustit `model:eval --grid --persist` a `model:replay --persist`,
    až bude ≥ 20 k her na patchi. Do té doby nevykládat lift ani AUC.
-2. **Winner's curse** — replay ukázal, že u top-1 doporučení model predikuje ~55 %, realita ~52 %.
-   Potřebuje korekci (návrh: shrinkage přes kandidáty). Statistická úloha → **jen na Fable 5**.
+2. **VYŘEŠENO 26. 8.: winner's curse** — korigováno EB shrinkage přes kandidáty (`ebShrink`
+   ve `stats.ts`, napojení ve `scoreDraft`; šum = výběrový rozptyl odhadu `n·m(1−m)/(N₀+n)²`,
+   NE šířka posterioru — viz PONAUCENI 26. 8., první verze s šířkou posterioru zkolabovala
+   žebříček). Replay, rank-1 predikce vs realita: bez korekce +8,0 p.b. (default priory)
+   resp. +3,0 (grid), s korekcí +1,8 resp. +1,4 p.b. — v mezích šumu (n=114/238). Kalibrace
+   P(chosen): ECE 0,0017, logloss 0,69288 — poprvé pod const. Replay nově umí
+   `--priors S,M,Y,H`. Pozor: korekce část žebříčku legitimně zplošťuje (chosen padá častěji
+   do ranku 26+); lift třídy 1 je +0,8 až +1,5 p.b.
 3. **Budoucí členy nejsou v MC intervalu** — jsou to zatím deterministická očekávání.
 4. **VYŘEŠENO 26. 8.: synergický člen dominoval kvůli špatné baseline.** Podezření se potvrdilo:
    `sigmoid((logit sA + logit sB)/2)` byl poloviční součet, nekonzistentní se zbytkem modelu

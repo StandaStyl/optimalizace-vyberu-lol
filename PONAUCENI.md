@@ -4,6 +4,24 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 26. 8. 2026 — EB korekce winner's curse: šum je výběrový rozptyl odhadu, ne šířka posterioru
+
+**Co se stalo:** první verze korekce (shrinkage kandidátů k průměru pole) použila jako šumový
+rozptyl šířku posterioru z MC vzorků. To je epistemická nejistota — u odhadů už jednou sražených
+priory je mnohem větší než skutečná výběrová chyba, takže metoda momentů vyhodnotila veškerý
+rozptyl mezi kandidáty jako šum (τ²→0) a žebříček zkolaboval: všichni kandidáti ~50,0 %, jedna
+obří třída indiference, rank-1 jen 69 z 14 690 picků. Kalibrace přitom vypadala skvěle — bez
+replay matice (priory × korekce) by chyba prošla jako úspěch.
+
+**Řešení:** šum pro EB vrstvu je výběrový rozptyl bodového odhadu: na term
+`n·m(1−m)/(N₀+n)²`, delta metodou do logit prostoru (`/(m(1−m))²`), přes termy váhy².
+U kandidáta bez dat nula (odhad je deterministicky prior), u silného prioru malý — dvojité
+shrinkage tím zmizí. Intervaly se korekcí jen posouvají, nezužují (selekce nesnižuje
+epistemickou nejistotu). Výsledek: rank-1 nadhodnocení z +8,0 p.b. na +1,4 až +1,8 p.b.
+(v šumu), ECE 0,0017, logloss P(chosen) poprvé pod const. Poučení: **u empirical-Bayes
+korekce vždy rozlišit šířku posterioru od výběrové chyby odhadu — a každou „úspěšnou"
+kalibraci konfrontovat s tím, co udělala s rozlišovací schopností.**
+
 ## 26. 8. 2026 — Synergická baseline s polovičním součtem: člen tiše nasával sílu šampionů
 
 **Co se stalo:** očekávaná winrate dvojice byla `sigmoid((logit sA + logit sB)/2)`, zatímco

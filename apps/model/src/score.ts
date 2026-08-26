@@ -96,12 +96,25 @@ export interface Recommendation {
  * Prior mean for a matchup A vs B is the independence expectation P = s_A(1-s_B)/(s_A(1-s_B)+(1-s_A)s_B).
  * Returned term = logit(posterior mean) - logit(expected), i.e. 0 when nothing is learned.
  */
-function deviationTerm(observed: WinLoss | undefined, expected: number, priorN: number): { logOdds: number; post: BetaPosterior; expectedLogit: number } {
+function deviationTerm(observed: WinLoss | undefined, expected: number, priorN: number): { logOdds: number; post: BetaPosterior; expectedLogit: number; sVar: number } {
   const wins = observed?.wins ?? 0;
   const losses = (observed?.games ?? 0) - wins;
   const post = posterior(wins, losses, expected, priorN);
   const expectedLogit = logit(expected);
-  return { logOdds: logit(mean(post)) - expectedLogit, post, expectedLogit };
+  return { logOdds: logit(mean(post)) - expectedLogit, post, expectedLogit, sVar: samplingVar(wins + losses, mean(post), priorN) };
+}
+
+/**
+ * Sampling variance of the posterior-mean *estimator* in logit space — the selection noise
+ * the winner's-curse correction shrinks against. This is NOT the posterior width: with no
+ * data the estimate equals the prior deterministically (variance 0), with a strong prior
+ * the estimator barely moves with the data. Var[m] = n·m(1−m)/(N0+n)²; divided by (m(1−m))²
+ * for the delta-method transfer to logit scale.
+ */
+function samplingVar(n: number, m: number, priorN: number): number {
+  if (n <= 0) return 0;
+  const mq = Math.max(1e-6, m * (1 - m));
+  return n / ((priorN + n) ** 2 * mq);
 }
 
 function independence(sA: number, sB: number): number {
@@ -200,7 +213,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
   const occupancy = enemyOccupancy(enemyPos);
   const u = rng(seed);
   const out: Recommendation[] = [];
-  const mcVar: number[] = []; // per-candidate MC variance of the summed logit, for ebShrink below
+  const estVar: number[] = []; // per-candidate sampling variance of the summed logit, for ebShrink below
 
   const strengthOf = (champ: number, pos: Position) => {
     const s = src.strength(champ, pos);
@@ -212,8 +225,9 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
     const sMe = strengthOf(champ, state.myPos);
     if (!playedOnPosition(champ, state.myPos, src)) continue; // thesis rule, tightened: a real pick on this position, not a one-off
 
-    const terms: Array<{ c: Contribution; post: BetaPosterior | null; expectedLogit: number; weight: number }> = [];
-    terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: src.strength(champ, state.myPos)?.games ?? 0 }, post: sMe, expectedLogit: 0, weight: 1 });
+    const terms: Array<{ c: Contribution; post: BetaPosterior | null; expectedLogit: number; weight: number; sVar: number }> = [];
+    const sGames = src.strength(champ, state.myPos)?.games ?? 0;
+    terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: sGames }, post: sMe, expectedLogit: 0, weight: 1, sVar: samplingVar(sGames, mean(sMe), params.priorNStrength) });
 
     // Counters vs each enemy: expectation over their inferred positions.
     for (const e of state.enemies) {
@@ -224,7 +238,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
         const sB = mean(strengthOf(e.champ, pos));
         const obs = src.matchup(champ, state.myPos, e.champ, pos);
         const t = deviationTerm(obs, independence(mean(sMe), sB), params.priorNMatchup);
-        terms.push({ c: { kind: "matchup", vs: e.champ, vsPos: pos, logOdds: t.logOdds * w, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: w });
+        terms.push({ c: { kind: "matchup", vs: e.champ, vsPos: pos, logOdds: t.logOdds * w, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: w, sVar: t.sVar });
       }
     }
 
@@ -239,7 +253,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       // summed over 10 pairs (each champ in 4) that re-counted team strength ~2× extra.
       const expected = sigmoid(logit(mean(sMe)) + logit(sB));
       const t = deviationTerm(obs, expected, params.priorNSynergy);
-      terms.push({ c: { kind: "synergy", vs: a.champ, vsPos: a.pos, logOdds: t.logOdds, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: 1 });
+      terms.push({ c: { kind: "synergy", vs: a.champ, vsPos: a.pos, logOdds: t.logOdds, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: 1, sVar: t.sVar });
     }
 
     // Player term: shrink player's own rate on this champ towards the champion's rate, decayed by recency.
@@ -248,7 +262,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       if (h && h.games > 0) {
         const rec = h.lastPlayedDaysAgo === undefined ? 1 : Math.exp(-h.lastPlayedDaysAgo / params.recencyTauDays);
         const t = deviationTerm(h, mean(sMe), params.priorNPlayer);
-        terms.push({ c: { kind: "player", logOdds: t.logOdds * rec, games: h.games }, post: t.post, expectedLogit: t.expectedLogit, weight: rec });
+        terms.push({ c: { kind: "player", logOdds: t.logOdds * rec, games: h.games }, post: t.post, expectedLogit: t.expectedLogit, weight: rec, sVar: t.sVar });
       }
     }
 
@@ -270,7 +284,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
           if (t.logOdds < 0) threats.push({ champ: y, pos, pPick: free * py, logOdds: t.logOdds });
         }
       }
-      terms.push({ c: { kind: "future_matchup", logOdds: params.futureWeight * fm, games: fmGames }, post: null, expectedLogit: 0, weight: 0 });
+      terms.push({ c: { kind: "future_matchup", logOdds: params.futureWeight * fm, games: fmGames }, post: null, expectedLogit: 0, weight: 0, sVar: 0 });
 
       let fs = 0, fsGames = 0;
       const allyFilled = new Set<Position>([state.myPos, ...state.allies.flatMap((a) => (a.pos ? [a.pos] : []))]);
@@ -284,23 +298,23 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
           fs += py * t.logOdds; fsGames += obs?.games ?? 0;
         }
       }
-      terms.push({ c: { kind: "future_synergy", logOdds: params.futureWeight * fs, games: fsGames }, post: null, expectedLogit: 0, weight: 0 });
+      terms.push({ c: { kind: "future_synergy", logOdds: params.futureWeight * fs, games: fsGames }, post: null, expectedLogit: 0, weight: 0, sVar: 0 });
     }
     threats.sort((a, b) => a.pPick * a.logOdds - b.pPick * b.logOdds);
 
     const point = terms.reduce((acc, t) => acc + t.c.logOdds, 0);
     // Monte-Carlo interval: sample each term's posterior independently.
     const samples: number[] = new Array(params.mcSamples);
-    let sx = 0, sxx = 0;
     for (let i = 0; i < params.mcSamples; i++) {
       let x = 0;
       for (const t of terms) x += t.post ? (logit(sampleBeta(t.post, u)) - t.expectedLogit) * t.weight : t.c.logOdds;
       samples[i] = sigmoid(x);
-      sx += x; sxx += x * x;
     }
     samples.sort((a, b) => a - b);
     const tail = (1 - params.intervalLevel) / 2;
-    mcVar.push(Math.max(1e-9, sxx / params.mcSamples - (sx / params.mcSamples) ** 2));
+    // Selection noise of this candidate's point estimate: independent terms add in weight².
+    // (Future terms are probability-weighted averages of many devs — their noise is small; left out.)
+    estVar.push(Math.max(1e-9, terms.reduce((a, t) => a + t.weight * t.weight * t.sVar, 0)));
     out.push({ champ, p: sigmoid(point), lo: quantile(samples, tail), hi: quantile(samples, 1 - tail), contributions: terms.map((t) => t.c), threats: threats.slice(0, 5) });
   }
 
@@ -309,15 +323,14 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
   // Shrink every candidate towards the field mean, more when its own posterior is wide;
   // the same monotone map is applied to lo/hi, so quantiles stay exact.
   if (out.length >= 5) {
-    const { mu, lambda } = ebShrink(out.map((r) => logit(r.p)), mcVar);
+    const { mu, lambda } = ebShrink(out.map((r) => logit(r.p)), estVar);
     out.forEach((r, i) => {
-      const lam = lambda[i]!;
       const x = logit(r.p);
-      const xNew = mu + lam * (x - mu);
-      // EB posterior variance is lam * sigma^2, so quantile offsets scale by sqrt(lam).
-      const s = Math.sqrt(lam);
-      r.lo = sigmoid(xNew - s * (x - logit(r.lo)));
-      r.hi = sigmoid(xNew + s * (logit(r.hi) - x));
+      const xNew = mu + lambda[i]! * (x - mu);
+      // Translate the interval with the point. Its width is epistemic (posterior), which the
+      // selection correction does not reduce — only the point estimate is de-biased.
+      r.lo = sigmoid(logit(r.lo) + (xNew - x));
+      r.hi = sigmoid(logit(r.hi) + (xNew - x));
       r.p = sigmoid(xNew);
     });
   }
