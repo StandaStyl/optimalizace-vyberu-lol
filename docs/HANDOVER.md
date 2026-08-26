@@ -127,14 +127,15 @@ Známé mezery / co dál:
 2. **Winner's curse** — replay ukázal, že u top-1 doporučení model predikuje ~55 %, realita ~52 %.
    Potřebuje korekci (návrh: shrinkage přes kandidáty). Statistická úloha → **jen na Fable 5**.
 3. **Budoucí členy nejsou v MC intervalu** — jsou to zatím deterministická očekávání.
-4. **K ověření: synergický člen dominuje.** Na testovacím 5v5 draftu (24. 8., ~20 k her) vyšlo
-   síla +1,8 p.b., matchupy +2,1 p.b., ale **synergie −10,1 p.b.** Deset dvojic v týmu se sčítá,
-   takže i malé odchylky dají velký součet. Může jít o reálný efekt, nebo o systematické
-   zkreslení (podezřelý je baseline `sigmoid((logit sA + logit sB)/2)` a možnost, že se týmový
-   efekt počítá vícekrát přes překrývající se dvojice). Plumbing je ověřený: součet členů se
-   rovná `logit(pBlue)` na 6 desetinných míst, prohození týmů dá součet přesně 1,0, prázdný
-   draft 0,5. **Statistická úloha → řešit na Fable 5**, ideálně spolu s laděním `priorNSynergy`
-   v `model:eval --grid`.
+4. **VYŘEŠENO 26. 8.: synergický člen dominoval kvůli špatné baseline.** Podezření se potvrdilo:
+   `sigmoid((logit sA + logit sB)/2)` byl poloviční součet, nekonzistentní se zbytkem modelu
+   (síla `Σ logit s`, matchup `logit sA − logit sB`) — každá dvojice nasávala ~½ součtu sil,
+   součet přes 10 dvojic znovu počítal ~2× sílu týmu. Ověřeno regresí na datech (směrnice
+   1.11 ± 0.05, H0=0.5 vyloučena), opraveno na plný součet v `team.ts` + `score.ts` (2×).
+   Holdout: logloss full s gridem 0.69547 → 0.69434, AUC 0.5204 → 0.5220, ztráta na const
+   poloviční (0.0023 → 0.0012). Detail v PONAUCENI (26. 8.). **Full model zatím const
+   nepřekonává** — optimum priorů stále na okraji gridu (S=M=1000); další krok je víc dat
+   (test měl jen 1 469 her) a případně rozšířit rozsah gridu.
 5. **Tierová pásma: rozhodnout, co použít v modelu.** Vyhledáním přes League-V4 má pásmo jen
    ~2 000 hráčů (5 % účastníků), takže pásmové modely stály skoro na ničem. Migrace 0008 přidala
    `match.tier_band` odvozené většinou ze známých účastníků — pokrytí vzrostlo na ~45 % zápasů

@@ -65,7 +65,7 @@ export function teamLogit(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, p
         for (let j = i + 1; j < team.length; j++) {
           const a = team[i]!, b = team[j]!;
           const obs = src.synergy(a.champ, a.pos, b.champ, b.pos) ?? src.synergy(b.champ, b.pos, a.champ, a.pos);
-          y += dev(obs, sigmoid((logit(st[i]!) + logit(st[j]!)) / 2), params.priorNSynergy);
+          y += dev(obs, sigmoid(logit(st[i]!) + logit(st[j]!)), params.priorNSynergy);
         }
       return y;
     };

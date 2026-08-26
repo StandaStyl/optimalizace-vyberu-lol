@@ -232,8 +232,11 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       if (!a.pos) continue;
       const sB = mean(strengthOf(a.champ, a.pos));
       const obs = src.synergy(champ, state.myPos, a.champ, a.pos);
-      // Expected shared win-rate under independence of two allies: average of their log-odds.
-      const expected = sigmoid((logit(mean(sMe)) + logit(sB)) / 2);
+      // Expected shared win-rate under independence: log-odds add, consistently with the
+      // team strength term (Σ logit s) and the matchup baseline (logit sA − logit sB).
+      // The former average (…/2) let half of each pair's strength leak into "synergy";
+      // summed over 10 pairs (each champ in 4) that re-counted team strength ~2× extra.
+      const expected = sigmoid(logit(mean(sMe)) + logit(sB));
       const t = deviationTerm(obs, expected, params.priorNSynergy);
       terms.push({ c: { kind: "synergy", vs: a.champ, vsPos: a.pos, logOdds: t.logOdds, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: 1 });
     }
@@ -276,7 +279,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
         for (const [y, py] of dist) {
           const sB = mean(strengthOf(y, pos));
           const obs = src.synergy(champ, state.myPos, y, pos);
-          const t = deviationTerm(obs, sigmoid((logit(mean(sMe)) + logit(sB)) / 2), params.priorNSynergy);
+          const t = deviationTerm(obs, sigmoid(logit(mean(sMe)) + logit(sB)), params.priorNSynergy);
           fs += py * t.logOdds; fsGames += obs?.games ?? 0;
         }
       }

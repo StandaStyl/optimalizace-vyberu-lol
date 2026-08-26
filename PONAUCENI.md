@@ -4,6 +4,27 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 26. 8. 2026 — Synergická baseline s polovičním součtem: člen tiše nasával sílu šampionů
+
+**Co se stalo:** očekávaná winrate dvojice byla `sigmoid((logit sA + logit sB)/2)`, zatímco
+zbytek modelu sčítá příspěvky v logit prostoru naplno (síla týmu `Σ logit s`, matchup
+`logit sA − logit sB`). Poloviční součet znamenal, že odchylka každé dvojice obsahovala
+~½ součtu sil obou šampionů; přes 10 dvojic (každý šampion ve 4) synergický součet znovu
+započetl ~2× sílu týmu. Symptomy vypadaly jako rozumná čísla: synergie −10,1 p.b. na
+testovacím draftu, ECE 0.079, grid tlačil priory na okraj mřížky (S=M=1000) — grid-search
+strukturální zkreslení nespraví, jen ho shrinkage „vypíná". Přesně případ z pravidla §0:
+chyba, která vypadá jako rozumné číslo.
+
+**Řešení:** ověřeno na vlastních datech vážené regresí `logit(wr dvojice)` na
+`logit sA + logit sB` (s korekcí atenuace — binomický šum v x je známý): směrnice
+1.11 ± 0.05 (1 732 párů, champ ≥ 800 her, pár ≥ 40), na přísných prazích 0.86 ± 0.18 —
+konzistentní s plným součtem, vyloučeno 0.5. Baseline opravena na
+`sigmoid(logit sA + logit sB)` na třech místech (`team.ts`, `score.ts` 2×). Efekt na
+holdoutu: logloss full 0.71134 → 0.70645 (default priory), s gridem 0.69547 → 0.69434,
+AUC 0.5204 → 0.5220, ECE 0.036 → 0.031; ztráta na const baseline klesla na polovinu
+(0.0023 → 0.0012). Poučení: **baseline každého členu musí být konzistentní se strukturou
+zbytku modelu — a optimum priorů na okraji gridu je červená vlajka, ne výsledek.**
+
 ## 24. 8. 2026 — Odpojené procesy umřely tiše; měření latence ukázalo odmítnuté spojení jako „latenci"
 
 **Co se stalo:** crawler i API spuštěné přes `Start-Process` skončily bez jediného řádku
