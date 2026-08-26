@@ -1,5 +1,5 @@
 import { POSITIONS, type Position } from "@da/core";
-import { logit, mean, posterior, quantile, rng, sampleBeta, sigmoid, type BetaPosterior } from "./stats.ts";
+import { ebShrink, logit, mean, posterior, quantile, rng, sampleBeta, sigmoid, type BetaPosterior } from "./stats.ts";
 
 /** Model parameters (defaults from plan §9.2; tuned in phase 3). */
 export interface ModelParams {
@@ -200,6 +200,7 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
   const occupancy = enemyOccupancy(enemyPos);
   const u = rng(seed);
   const out: Recommendation[] = [];
+  const mcVar: number[] = []; // per-candidate MC variance of the summed logit, for ebShrink below
 
   const strengthOf = (champ: number, pos: Position) => {
     const s = src.strength(champ, pos);
@@ -290,14 +291,35 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
     const point = terms.reduce((acc, t) => acc + t.c.logOdds, 0);
     // Monte-Carlo interval: sample each term's posterior independently.
     const samples: number[] = new Array(params.mcSamples);
+    let sx = 0, sxx = 0;
     for (let i = 0; i < params.mcSamples; i++) {
       let x = 0;
       for (const t of terms) x += t.post ? (logit(sampleBeta(t.post, u)) - t.expectedLogit) * t.weight : t.c.logOdds;
       samples[i] = sigmoid(x);
+      sx += x; sxx += x * x;
     }
     samples.sort((a, b) => a - b);
     const tail = (1 - params.intervalLevel) / 2;
+    mcVar.push(Math.max(1e-9, sxx / params.mcSamples - (sx / params.mcSamples) ** 2));
     out.push({ champ, p: sigmoid(point), lo: quantile(samples, tail), hi: quantile(samples, 1 - tail), contributions: terms.map((t) => t.c), threats: threats.slice(0, 5) });
+  }
+
+  // Winner's-curse correction (HANDOVER bod 2): the top of the list is the max of ~dozens of
+  // noisy estimates, so its p is biased up (replay: rank-1 meanP 57 % vs realised 49 %).
+  // Shrink every candidate towards the field mean, more when its own posterior is wide;
+  // the same monotone map is applied to lo/hi, so quantiles stay exact.
+  if (out.length >= 5) {
+    const { mu, lambda } = ebShrink(out.map((r) => logit(r.p)), mcVar);
+    out.forEach((r, i) => {
+      const lam = lambda[i]!;
+      const x = logit(r.p);
+      const xNew = mu + lam * (x - mu);
+      // EB posterior variance is lam * sigma^2, so quantile offsets scale by sqrt(lam).
+      const s = Math.sqrt(lam);
+      r.lo = sigmoid(xNew - s * (x - logit(r.lo)));
+      r.hi = sigmoid(xNew + s * (logit(r.hi) - x));
+      r.p = sigmoid(xNew);
+    });
   }
   return out.sort((a, b) => b.p - a.p);
 }

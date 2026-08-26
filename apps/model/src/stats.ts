@@ -35,6 +35,27 @@ export function clamp(x: number, lo: number, hi: number): number {
 }
 
 /**
+ * Empirical-Bayes shrinkage across candidates (winner's-curse correction).
+ * Model: true values x_c ~ N(mu, tau2), estimates xHat_c with known variance vars_c.
+ * Posterior mean of x_c is mu + lambda_c (xHat_c - mu), lambda_c = tau2 / (tau2 + vars_c).
+ * tau2 is estimated by method of moments (observed spread minus average noise), with two
+ * precision-weighted refinement iterations; tau2 = 0 means the spread is all noise and
+ * every candidate collapses to the field mean.
+ */
+export function ebShrink(xs: number[], vars: number[]): { mu: number; lambda: number[] } {
+  const n = xs.length;
+  let mu = xs.reduce((a, x) => a + x, 0) / n;
+  let tau2 = Math.max(0, xs.reduce((a, x) => a + (x - mu) ** 2, 0) / n - vars.reduce((a, v) => a + v, 0) / n);
+  for (let it = 0; it < 2; it++) {
+    const w = vars.map((v) => 1 / (v + tau2 + 1e-9));
+    const W = w.reduce((a, b) => a + b, 0);
+    mu = xs.reduce((a, x, i) => a + w[i]! * x, 0) / W;
+    tau2 = Math.max(0, xs.reduce((a, x, i) => a + w[i]! * ((x - mu) ** 2 - vars[i]!), 0) / W);
+  }
+  return { mu, lambda: vars.map((v) => tau2 / (tau2 + v)) };
+}
+
+/**
  * Deterministic PRNG (mulberry32) so Monte-Carlo intervals are reproducible for a given seed.
  */
 export function rng(seed: number): () => number {

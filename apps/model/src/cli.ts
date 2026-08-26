@@ -45,7 +45,14 @@ async function main(argv: string[]) {
       const mx = (await pool.query<{ mx: Date }>(`select max(game_start) mx from match where patch = $1`, [patch])).rows[0]!.mx;
       const cutoff = new Date(mx.getTime() - days * 86400_000);
       const scope = { patch, platforms: cfg.platforms, tierBand: band, cutoff };
-      const { report } = await runReplay(pool, scope, DEFAULT_PARAMS, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
+      let params = DEFAULT_PARAMS;
+      const pr = arg(argv, "--priors");
+      if (pr) {
+        const ns = pr.split(",").map(Number);
+        if (ns.length !== 4 || ns.some((x) => !Number.isFinite(x) || x <= 0)) throw new Error("--priors očekává S,M,Y,H (čtyři kladná čísla, např. 1000,1000,500,100)");
+        params = { ...DEFAULT_PARAMS, priorNStrength: ns[0]!, priorNMatchup: ns[1]!, priorNSynergy: ns[2]!, priorNPlayer: ns[3]! };
+      }
+      const { report } = await runReplay(pool, scope, params, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
       console.log(`replay: ${report.games} games, ${report.picks} picks, coverage ${(report.coverage * 100).toFixed(1)} %`);
       console.log(`lift: class 1 WR ${(report.lift.class1.wr * 100).toFixed(1)} % (n=${report.lift.class1.n}) vs other ${(report.lift.other.wr * 100).toFixed(1)} % (n=${report.lift.other.n}) → ${(report.lift.diff * 100).toFixed(1)} p.b.`);
       console.table(report.byRank.map((b) => ({ rank: b.bucket, n: b.n, wr: (b.wr * 100).toFixed(1) + "%", meanP: (b.meanP * 100).toFixed(1) + "%" })));
@@ -53,7 +60,7 @@ async function main(argv: string[]) {
       console.log(`calibration of P(chosen): logloss ${c.logloss.toFixed(5)}, brier ${c.brier.toFixed(5)}, auc ${c.auc.toFixed(4)}, ece ${c.ece.toFixed(4)}`);
       console.table(report.positionAccuracy.map((p) => ({ knownEnemies: p.knownEnemies, n: p.n, accuracy: Number.isNaN(p.accuracy) ? "-" : (p.accuracy * 100).toFixed(1) + "%" })));
       if (argv.includes("--persist")) {
-        const run = await pool.query<{ run_id: number }>(`insert into model_run(patch, tier_band, params) values ($1,$2,$3) returning run_id`, [patch, band, { ...DEFAULT_PARAMS, cutoff: cutoff.toISOString(), kind: "replay" }]);
+        const run = await pool.query<{ run_id: number }>(`insert into model_run(patch, tier_band, params) values ($1,$2,$3) returning run_id`, [patch, band, { ...params, cutoff: cutoff.toISOString(), kind: "replay" }]);
         await pool.query(`insert into model_replay(run_id, games, picks, report) values ($1,$2,$3,$4)`, [run.rows[0]!.run_id, report.games, report.picks, JSON.stringify(report)]);
         console.log("saved replay run", run.rows[0]!.run_id);
       }
