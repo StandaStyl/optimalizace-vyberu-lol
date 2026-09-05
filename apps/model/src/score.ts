@@ -34,6 +34,24 @@ export interface ModelParams {
    * (+4.5 p.b. pooled). Strength is estimated within the user's own stratum. 0 disables the split.
    */
   pilotExpGames: number;
+  /**
+   * SPEC-08: attribute prior for matchups. The prior mean of a specific matchup cell is shifted by
+   * the candidate's measured deviation against enemies that share the enemy's attributes
+   * (melee/ranged, dash/blink/none, class, toughness, damage type) — a hierarchical prior that
+   * speaks where the specific cell has few games and is overridden where it has many. 0 disables.
+   */
+  attrWeight: number;
+  /**
+   * Prior strength (pseudo-games) of one champion's residual attribute deviation, centred on its
+   * class's deviation. One champion's cells (hundreds of games) are noise-dominated — measured
+   * 5. 9. 2026: summing them over 25 pairs added ~0.8 logit of noise per game (holdout log-loss
+   * 0.80 vs 0.70) — so the residual is shrunk hard and the class level carries the signal.
+   */
+  priorNAttr: number;
+  /** Prior strength of the class-level attribute deviation (tens of thousands of games per cell). */
+  priorNAttrGroup: number;
+  /** Attribute dimensions used; each is a partition of champions (champion_attr.dim). */
+  attrDims: string[];
 }
 export const DEFAULT_PARAMS: ModelParams = {
   priorNStrength: 500,
@@ -48,6 +66,14 @@ export const DEFAULT_PARAMS: ModelParams = {
   rankBy: "lower",
   selectionCorrection: true,
   pilotExpGames: 10,
+  // Off by default: on the 5. 9. 2026 holdout (20 479 train / 2 654 test games) every weight
+  // raised AUC (0.535 → 0.548 at 1) but worsened log-loss (0.7013 → 0.7025 at 0.25, 0.7153 at 1)
+  // and ECE — ranking signal, over-confident as a probability. Adopt only with a calibration
+  // layer that fixes the pairwise over-confidence too (SPEC-08 §Rozhodnutí, follow-up SPEC-09).
+  attrWeight: 0,
+  priorNAttr: 2000,
+  priorNAttrGroup: 2000,
+  attrDims: ["range", "mobility", "class", "toughness", "dmgtype"],
 };
 
 export interface WinLoss {
@@ -76,6 +102,15 @@ export interface StatsSource {
   pilot?(champ: number, pos: Position): { exp: WinLoss; new: WinLoss } | undefined;
   /** Pooled logit gap experienced − new across all cells (estimated once from the whole table). */
   pilotGapLogit?(): number;
+  /** SPEC-08: attributes of a champion (dim → value). */
+  attrs?(champ: number): Record<string, string> | undefined;
+  /**
+   * SPEC-08: games of champ A on posA against enemies on posB that have attribute dim = value;
+   * wins are A's, expWins the sum of the independence expectation over those games.
+   */
+  vsAttr?(champA: number, posA: Position, posB: Position, dim: string, value: string): (WinLoss & { expWins: number }) | undefined;
+  /** SPEC-08: the same pooled over all champions of a class (champion_attr dim "class"); value "*" = all values. */
+  vsAttrGroup?(cls: string, posA: Position, posB: Position, dim: string, value: string): (WinLoss & { expWins: number }) | undefined;
 }
 
 export interface Slot {
@@ -102,6 +137,8 @@ export interface Contribution {
   games: number;
   /** For the strength term: which pilot stratum the estimate comes from (SPEC-07 C). */
   stratum?: "new" | "exp";
+  /** For matchup terms: the part of logOdds that came from the attribute prior (SPEC-08). */
+  attr?: number;
 }
 
 export interface Threat {
@@ -152,6 +189,63 @@ function samplingVar(n: number, m: number, priorN: number): number {
 function independence(sA: number, sB: number): number {
   const num = sA * (1 - sB);
   return num / (num + (1 - sA) * sB);
+}
+
+/**
+ * SPEC-08: hierarchical prior shift (logit) for the matchup A@posA vs B@posB, from attribute-level
+ * deviations: how A has done against enemies of B's kind on posB (melee/ranged, dash/blink/none,
+ * class, toughness, damage type), each read against what strengths alone predicted for those games.
+ * Symmetric — B's record against A's kind is the same information seen from the other side — so
+ * both perspectives are averaged. Dimensions add in logit space; overlap between them (a tank is
+ * usually melee) is accepted and checked by validation (full vs full_noattr), not modelled.
+ */
+export function attrPrior(src: StatsSource, params: ModelParams, a: number, posA: Position, b: number, posB: Position): number {
+  if (params.attrWeight <= 0 || !src.vsAttr || !src.attrs) return 0;
+  const clamp = (p: number) => Math.min(1 - 1e-6, Math.max(1e-6, p));
+  type Cell = WinLoss & { expWins: number };
+  // Form = pooled deviation over all values of the dimension ("*"): the champion's (or class's)
+  // own over/under-performance vs shrunk strength — identical for every dimension and every enemy
+  // position, so it must not be counted as attribute information (uncentred it was summed
+  // 5 dims × 25 pairs and gave holdout ECE 0.14). Only the contrast against it is information.
+  // Shrunk like everything else: a pooled cell of 2 games / 2 wins is not a form of logit(1) = +13.8
+  // (that single raw value blew one pair to −9 logit and the holdout log-loss to 0.79 on 5. 9.).
+  const form = (all: Cell | undefined, priorN: number) => (all && all.games > 0 ? deviationTerm(all, clamp(all.expWins / all.games), priorN).logOdds : 0);
+  const contrast = (cell: Cell, all: Cell | undefined, extra: number, priorN: number) =>
+    deviationTerm(cell, sigmoid(logit(clamp(cell.expWins / cell.games)) + form(all, priorN) + extra), priorN).logOdds;
+  const side = (x: number, posX: Position, y: number, posY: Position) => {
+    const ay = src.attrs!(y);
+    if (!ay) return 0;
+    const cls = src.attrs!(x)?.class;
+    let s = 0;
+    for (const dim of params.attrDims) {
+      const v = ay[dim];
+      if (v === undefined) continue;
+      // class level first (where the effect is measurable), then the champion's residual on top of it
+      let grp = 0;
+      if (cls && src.vsAttrGroup) {
+        const g = src.vsAttrGroup(cls, posX, posY, dim, v);
+        if (g && g.games > 0) grp = contrast(g, src.vsAttrGroup(cls, posX, posY, dim, "*"), 0, params.priorNAttrGroup);
+      }
+      const cell = src.vsAttr!(x, posX, posY, dim, v);
+      s += grp + (cell && cell.games > 0 ? contrast(cell, src.vsAttr!(x, posX, posY, dim, "*"), grp, params.priorNAttr) : 0);
+    }
+    return s;
+  };
+  return params.attrWeight * (side(a, posA, b, posB) - side(b, posB, a, posA)) / 2;
+}
+
+/**
+ * Matchup term A@posA vs B@posB: the specific cell's deviation from independence, with the
+ * attribute prior (SPEC-08) as the cell's prior mean. logOdds is reported against plain
+ * independence, so the attribute part is visible (`attr`) and the term is 0 only when neither
+ * the cell nor the attributes say anything.
+ */
+function matchupTerm(src: StatsSource, params: ModelParams, a: number, posA: Position, sA: number, b: number, posB: Position, sB: number) {
+  const base = independence(sA, sB);
+  const shift = attrPrior(src, params, a, posA, b, posB);
+  const obs = src.matchup(a, posA, b, posB);
+  const t = deviationTerm(obs, sigmoid(logit(base) + shift), params.priorNMatchup);
+  return { logOdds: t.logOdds + shift, attr: shift, post: t.post, expectedLogit: logit(base), sVar: t.sVar, games: obs?.games ?? 0 };
 }
 
 /**
@@ -288,10 +382,8 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       for (const pos of POSITIONS) {
         const w = dist[pos] ?? 0;
         if (w < 0.02) continue;
-        const sB = mean(strengthOf(e.champ, pos));
-        const obs = src.matchup(champ, state.myPos, e.champ, pos);
-        const t = deviationTerm(obs, independence(mean(sMe), sB), params.priorNMatchup);
-        terms.push({ c: { kind: "matchup", vs: e.champ, vsPos: pos, logOdds: t.logOdds * w, games: obs?.games ?? 0 }, post: t.post, expectedLogit: t.expectedLogit, weight: w, sVar: t.sVar });
+        const t = matchupTerm(src, params, champ, state.myPos, mean(sMe), e.champ, pos, mean(strengthOf(e.champ, pos)));
+        terms.push({ c: { kind: "matchup", vs: e.champ, vsPos: pos, logOdds: t.logOdds * w, games: t.games, ...(t.attr ? { attr: t.attr * w } : {}) }, post: t.post, expectedLogit: t.expectedLogit, weight: w, sVar: t.sVar });
       }
     }
 
@@ -330,10 +422,8 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
         if (free < 0.02) continue;
         const dist = pickDistribution(pos, src, excl, params.futureMinShare);
         for (const [y, py] of dist) {
-          const sB = mean(strengthOf(y, pos));
-          const obs = src.matchup(champ, state.myPos, y, pos);
-          const t = deviationTerm(obs, independence(mean(sMe), sB), params.priorNMatchup);
-          fm += free * py * t.logOdds; fmGames += obs?.games ?? 0;
+          const t = matchupTerm(src, params, champ, state.myPos, mean(sMe), y, pos, mean(strengthOf(y, pos)));
+          fm += free * py * t.logOdds; fmGames += t.games;
           if (t.logOdds < 0) threats.push({ champ: y, pos, pPick: free * py, logOdds: t.logOdds });
         }
       }
@@ -439,7 +529,7 @@ export function recommendBans(state: DraftState, recs: Recommendation[], src: St
       if (free < 0.02) continue;
       const dist = pickDistribution(pos, src, new Set([...taken, r.champ]), params.futureMinShare);
       for (const [y, py] of dist) {
-        const t = deviationTerm(src.matchup(r.champ, state.myPos, y, pos), independence(sMe, mean(strengthOf(y, pos))), params.priorNMatchup);
+        const t = matchupTerm(src, params, r.champ, state.myPos, sMe, y, pos, mean(strengthOf(y, pos)));
         const cur = loss.get(y) ?? { loss: 0, pPick: 0 };
         cur.loss += (weights[k]! / wz) * free * py * t.logOdds;
         if (k === 0) cur.pPick += free * py;

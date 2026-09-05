@@ -4,6 +4,33 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 5. 9. 2026 — Atributový prior: dvě chyby, které odhalila až validace, ne testy
+
+**Co se stalo:** SPEC-08 prošel typecheckem i jednotkovými testy a na holdoutu dal log-loss 0,758
+(plný model bez něj 0,701). Příčiny dvě, obě neviditelné v syntetickém světě testů: (1) odchylka
+„A proti melee" nesla celou *formu* A proti shrunk síle — stejnou pro každou dimenzi i pozici,
+v týmovém modelu sečtenou 5 × 25 krát (ECE 0,14); (2) po centrování byla forma z pooled buňky
+počítaná syrově — 2 hry / 2 výhry = logit(1) = +13,8, jeden pár Gnar jungle skončil na −9 logit
+(log-loss 0,80). Třetí, principiální: po opravách atributy zvyšují AUC a přesto zhoršují log-loss
+při každé váze — jako pravděpodobnost jsou přehnaně sebejisté.
+
+**Řešení:** každý nový člen modelu **nejdřív na holdout** (`eval` vrací `full_noattr`), pak
+diagnostika rozdělení členů (sd, min, max po párech i po hrách) — extrém ±11 logit je vidět na
+první pohled. Každou odchylku centrovat na pooled baseline a i baseline shrinkovat stejným priorem;
+nikdy syrový podíl z malé buňky. Když AUC roste a log-loss klesá, není to zisk — je to
+nekalibrovaný signál a patří pod kalibrační vrstvu, ne do výchozích parametrů.
+
+## 5. 9. 2026 — Párová vrstva na 20 tis. hrách neporazí sílu; priory z gridu na 5 tis. hrách zestárly
+
+**Co se stalo:** grid při SPEC-08 ukázal, že plný model (M 300, Y 150) má holdout log-loss 0,701
+proti 0,691 samotné síly; nejlepší M 3 000 / Y 1 500 dá 0,692 — pořád ne lépe. Priory se ladily
+gridem na ~5 tis. hrách s maximy 1 000 / 500; s 20 tis. hrami shrinkage zeslábne a šum 25 + 10
+párových členů se sčítá.
+
+**Řešení:** grid priorů opakovat s růstem dat (rozsah rozšířen na 3 000 / 5 000) a zapisovat do
+`model_run`; změnu výchozích priorů nechat jako explicitní rozhodnutí (mění měření SPEC-07), ne
+tichou úpravu. Do HANDOVER patří i to, kdy naposledy grid běžel a na kolika hrách.
+
 ## 5. 9. 2026 — Restart API se špatným vstupním bodem: proces tiše umřel, logy prázdné
 
 **Co se stalo:** při restartu API po změně výchozích parametrů jsem spustil `apps/api/src/server.ts`

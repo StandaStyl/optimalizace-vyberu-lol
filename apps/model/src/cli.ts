@@ -7,7 +7,7 @@ import { runReplay } from "./replay.ts";
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
   eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
-  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb|--no-eb] [--pilot N] [--persist]   retrospective draft replay (reality check)
+  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb|--no-eb] [--pilot N] [--attr W] [--persist]   retrospective draft replay (reality check)
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -31,7 +31,10 @@ async function main(argv: string[]) {
   try {
     if (cmd === "refresh") {
       const t0 = Date.now();
-      await pool.query("select refresh_aggregates()");
+      // one statement for all aggregates; the role's default 2 min timeout is too tight once
+      // the attribute aggregate (SPEC-08) is in (session-level, so it must be the same connection)
+      const c = await pool.connect();
+      try { await c.query("set statement_timeout = '600s'"); await c.query("select refresh_aggregates()"); } finally { c.release(); }
       const r = await pool.query(`select name, rows from mat_refresh order by 1`);
       console.table(r.rows);
       console.log(`refreshed in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
@@ -62,6 +65,8 @@ async function main(argv: string[]) {
       if (argv.includes("--no-eb")) params = { ...params, selectionCorrection: false };
       const pilotArg = arg(argv, "--pilot");
       if (pilotArg !== undefined) params = { ...params, pilotExpGames: Number(pilotArg) };
+      const attrArg = arg(argv, "--attr");
+      if (attrArg !== undefined) params = { ...params, attrWeight: Number(attrArg) };
       const { report } = await runReplay(pool, scope, params, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
       console.log(`replay: ${report.games} games, ${report.picks} picks, coverage ${(report.coverage * 100).toFixed(1)} %`);
       console.log(`lift: class 1 WR ${(report.lift.class1.wr * 100).toFixed(1)} % (n=${report.lift.class1.n}) vs other ${(report.lift.other.wr * 100).toFixed(1)} % (n=${report.lift.other.n}) → ${(report.lift.diff * 100).toFixed(1)} p.b.`);

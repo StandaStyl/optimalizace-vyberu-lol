@@ -22,6 +22,8 @@ interface Cached {
   names: Map<number, { name: string; key: string }>;
   ddragon: string;
   loadedAt: number;
+  /** SPEC-07 D: realised WR by model rank from the newest persisted replay run with the current defaults. */
+  reality: { runId: number; createdAt: string; games: number; picks: number; byRank: Array<{ bucket: string; n: number; wr: number; meanP: number }> } | null;
 }
 
 const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
@@ -40,7 +42,16 @@ export function createApi(opts: ApiOptions) {
       byBand.set(band ?? "all", await loadStatsSource(opts.pool, { patch: patchRow.patch, platforms: opts.platforms, tierBand: band }));
     }
     const names = new Map((await opts.pool.query<{ champion_id: number; name: string; key: string }>(`select champion_id, name, key from champion`)).rows.map((r) => [r.champion_id, { name: r.name, key: r.key }]));
-    return { patch: patchRow.patch, byBand, names, ddragon: patchRow.ddragon_ver, loadedAt: Date.now() };
+    // SPEC-07 D: the selection effect at the top of the list is not modelled away, it is shown —
+    // "picks that were rank 1 for us realised X % at a predicted Y %" from a replay run whose
+    // decision rule and priors are the ones serving now (any other run would describe a different model).
+    const same = (p: Record<string, unknown>) => p.rankBy === DEFAULT_PARAMS.rankBy && p.selectionCorrection === DEFAULT_PARAMS.selectionCorrection
+      && p.pilotExpGames === DEFAULT_PARAMS.pilotExpGames && (p.attrWeight ?? 0) === DEFAULT_PARAMS.attrWeight && p.priorNPlayer === DEFAULT_PARAMS.priorNPlayer;
+    const run = (await opts.pool.query<{ run_id: number; created_at: Date; games: number; picks: number; by_rank: Array<{ bucket: string; n: number; wr: number; meanP: number }>; params: Record<string, unknown> }>(
+      `select r.run_id, r.created_at, p.games, p.picks, p.report->'byRank' as by_rank, r.params
+       from model_replay p join model_run r using (run_id) where r.params->>'kind' = 'replay' and r.patch = $1 order by r.run_id desc limit 20`, [patchRow.patch])).rows.find((r) => same(r.params));
+    const reality = run ? { runId: run.run_id, createdAt: run.created_at.toISOString(), games: run.games, picks: run.picks, byRank: run.by_rank } : null;
+    return { patch: patchRow.patch, byBand, names, ddragon: patchRow.ddragon_ver, loadedAt: Date.now(), reality };
   }
   async function get(): Promise<Cached> {
     if (cache && Date.now() - cache.loadedAt < reloadMs) return cache;
@@ -106,7 +117,7 @@ export function createApi(opts: ApiOptions) {
 
         return json(res, 200, {
           patch: c.patch, band: src.scope.tierBand ?? "all", myPos: state.myPos, candidates: recs.length, enemyPositions,
-          fieldMean, rankedBy: DEFAULT_PARAMS.rankBy, personalised: !!state.myPuuid,
+          fieldMean, rankedBy: DEFAULT_PARAMS.rankBy, personalised: !!state.myPuuid, reality: c.reality,
           recommendations, bans, ...(logId === undefined ? {} : { logId }),
         });
       }

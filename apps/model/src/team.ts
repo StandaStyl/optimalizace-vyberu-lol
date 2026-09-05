@@ -1,6 +1,6 @@
 import type { Position } from "@da/core";
 import { logit, mean, posterior, sigmoid } from "./stats.ts";
-import type { ModelParams, StatsSource, WinLoss } from "./score.ts";
+import { attrPrior, type ModelParams, type StatsSource, type WinLoss } from "./score.ts";
 
 /** Which terms a model variant uses — the evaluation baselines are subsets of the full model. */
 export interface TermWeights {
@@ -55,7 +55,9 @@ export function teamLogit(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, p
         const rev = src.matchup(r.champ, r.pos, b.champ, b.pos);
         // pool both directions when stored one way only
         const pooled: WinLoss | undefined = obs ?? (rev ? { games: rev.games, wins: rev.games - rev.wins } : undefined);
-        x += w.matchup * dev(pooled, independence(sb[i]!, sr[j]!), params.priorNMatchup);
+        // SPEC-08: the attribute prior shifts the cell's prior mean; the term is read against independence.
+        const shift = attrPrior(src, params, b.champ, b.pos, r.champ, r.pos);
+        x += w.matchup * (dev(pooled, sigmoid(logit(independence(sb[i]!, sr[j]!)) + shift), params.priorNMatchup) + shift);
       }
   }
   if (w.synergy) {

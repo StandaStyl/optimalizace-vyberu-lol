@@ -202,3 +202,33 @@ matchupy jako hierarchický prior šampionských (řeší hlad po datech u count
 picky. Sonda 5. 9.: asasíni vs. počet tanků v nepřátelském týmu 51,8 → 48,2 % (n 9 000 → 7 750),
 Talon 57,6 → 43,5 %, Vayne 47,8 → 51,6 %; proti 5 ranged 58,6 % (n 1 245). Heimerdinger vs. melee
 se **nepotvrdil** (na lajně 49,9 vs. 50,0 %; proti melee-heavy týmu 39 %, n 112). Hypotéza H6.
+
+## 5c. Stav 5. 9. 2026 večer (SPEC-08 + bod D)
+
+Přečti [`docs/specs/SPEC-08`](specs/SPEC-08-atributove-vztahy.md) — atributy, hierarchický prior,
+validace i vedlejší zjištění o párové vrstvě jsou tam s čísly.
+
+**Hotovo:**
+- Atributy šampionů z LoL wiki (`ingest attrs`): range, mobility **dash/blink/none** (stránky Dash a
+  Blink — Poppy W ruší jen dash), class, toughness, dmgtype, subclass, mobility_rating. Tabulka
+  `champion_attr` (0011), agregát `mat_champ_vs_attr` (0012, 0013 — přes `mat_champ_wr`, refresh 77 s),
+  `refresh_aggregates()` volat se `set statement_timeout = '600s'` na stejném spojení (cli i worker
+  to dělají).
+- Model: `attrPrior` (třída → šampion → buňka, centrované na shrunk formě), `matchupTerm`, param
+  `attrWeight` (**výchozí 0**), `priorNAttr`, `priorNAttrGroup`, `attrDims`; replay `--attr W`;
+  eval vrací navíc `full_noattr`, když je váha > 0.
+- Bod D: `/api/score.reality` z posledního uloženého replay se shodnými parametry; UI řádek
+  „Kontrola reality". Replay s výchozími parametry se ukládá (`--persist`) — první běh 5. 9. večer.
+- Testy 53 (wiki parser 4, atributový prior 6).
+
+**Rozhodnutí, která čekají na Jana:**
+1. **Priory párové vrstvy.** Holdout 20 479 / 2 654 her: síla sama 0,69146; plný model s M 300 /
+   Y 150 0,70134 (ECE 0,056); nejlepší grid M 3 000 / Y 1 500 0,69223 (ECE 0,028) — pořád ne pod
+   sílu. Návrh: zvednout Y na 1 500 a M na 3 000 (mění měření SPEC-07 — replay s těmito priory je
+   v `data/replay-spec08.txt`), nebo rovnou SPEC-09.
+2. **SPEC-09 kalibrační vrstva** (globální teplota fitovaná na holdoutu) — řeší sebejistotu párů i
+   atributů, umožní atributy zapnout (AUC 0,535 → 0,548).
+3. Blend priorů mezi patchi 16.16 → 16.17 (stále neimplementováno).
+
+**Pasti z dneška (v PONAUCENI):** Bash heredoc ztrácí `\\`; `Stop-Process` podle CommandLine zabil
+vlastní shell; CTE baseline → kartézský součin; syrová forma z 2 her = +13,8 logit.

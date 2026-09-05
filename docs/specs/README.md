@@ -11,3 +11,4 @@ Potvrzené rozhodnutí = závazné. Změna = nový commit s úpravou příslušn
 | [SPEC-05](SPEC-05-kriteria-uspechu.md) | Kritéria úspěchu, kontrola reality, rizika | potvrzeno 2026-08-23 |
 | [SPEC-06](SPEC-06-vazby-a-bany.md) | Vazby napříč draftem, budoucí picky, bany, H5 | potvrzeno 2026-08-23 |
 | [SPEC-07](SPEC-07-rozhodovaci-pravidlo-a-pilot.md) | Rozhodovací pravidlo (spodní mez), zkušenost pilota, prezentace | potvrzeno 2026-09-05 |
+| [SPEC-08](SPEC-08-atributove-vztahy.md) | Atributy šampionů (wiki), hierarchický prior counterů, kontrola reality v UI (SPEC-07 D) | implementováno 2026-09-05, prior vypnut po validaci |

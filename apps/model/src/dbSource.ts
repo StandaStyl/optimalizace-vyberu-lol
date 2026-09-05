@@ -1,3 +1,4 @@
+import { buildAttrIndex } from "./attrIndex.ts";
 import type pg from "pg";
 import type { Platform, Position, TierBand } from "@da/core";
 import type { StatsSource, WinLoss } from "./score.ts";
@@ -73,6 +74,18 @@ export async function loadStatsSource(pool: pg.Pool, scope: LoadScope): Promise<
 
   const champions = (await pool.query<{ champion_id: number }>(`select champion_id from champion order by 1`)).rows.map((r) => r.champion_id);
 
+  // SPEC-08: champion attributes and the champion-vs-attribute cells (hierarchical matchup prior).
+  const attrs = new Map<number, Record<string, string>>();
+  for (const r of (await pool.query<{ champion_id: number; dim: string; value: string }>(`select champion_id, dim, value from champion_attr`)).rows) {
+    const m = attrs.get(r.champion_id) ?? {};
+    m[r.dim] = r.value;
+    attrs.set(r.champion_id, m);
+  }
+  const attrIndex = buildAttrIndex((await pool.query<{ champ_a: number; pos_a: Position; pos_b: Position; dim: string; value: string; games: number; wins: number; exp: string }>(
+    `select champ_a, pos_a, pos_b, dim, value, sum(games)::int games, sum(wins_a)::int wins, sum(exp_wins_a)::text exp
+     from mat_champ_vs_attr where patch = $1 and platform = any($2) ${bandSql} group by 1,2,3,4,5`, params)).rows
+    .map((r) => ({ champ: r.champ_a, posA: r.pos_a, posB: r.pos_b, dim: r.dim, value: r.value, games: r.games, wins: r.wins, expWins: Number(r.exp) })), attrs);
+
   // Player history is queried lazily (one player per request) and cached for the life of this source.
   const playerCache = new Map<string, Map<number, WinLoss & { lastPlayedDaysAgo: number }>>();
   const loadPlayer = async (puuid: string) => {
@@ -97,6 +110,9 @@ export async function loadStatsSource(pool: pg.Pool, scope: LoadScope): Promise<
     champions: () => champions,
     pilot: (c, p) => pilot.get(`${c}:${p}`),
     pilotGapLogit: () => pilotGap,
+    attrs: (c) => attrs.get(c),
+    vsAttr: attrIndex.vsAttr,
+    vsAttrGroup: attrIndex.vsAttrGroup,
     preloadPlayer: loadPlayer,
   };
 }

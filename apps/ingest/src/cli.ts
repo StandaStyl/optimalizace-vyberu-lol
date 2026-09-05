@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { getPool, loadConfig, migrate, RiotClient } from "@da/core";
 import { ddragonSync } from "./ddragonSync.ts";
+import { syncAttributes } from "./attrs.ts";
 import { seedPlayers } from "./seed.ts";
 import { crawl, ExpiredKeyError } from "./crawler.ts";
 import { lookupTiers } from "./lookupTiers.ts";
@@ -15,6 +16,7 @@ const MIGRATIONS_DIR = resolve(here, "../../../infra/migrations");
 const USAGE = `usage: cli.ts <command> [options]
   migrate                 apply infra/migrations
   ddragon-sync            upsert current patch + champions from Data Dragon
+  attrs                   upsert champion attributes from the LoL wiki (SPEC-08)
   seed [--pages N]        fill seed_player from the ranked ladder (default 2 pages per tier)
   crawl [--max N]         crawl matches into the DB (default: until exhausted)
   tiers [--limit N]       fill tier for snowballed players
@@ -54,6 +56,9 @@ async function main(argv: string[]) {
       case "ddragon-sync":
         await ddragonSync(pool);
         break;
+      case "attrs":
+        await syncAttributes(pool);
+        break;
       case "seed": {
         const n = await seedPlayers(pool, riot(), { platforms: cfg.platforms, pagesPerTier: Number(arg(argv, "--pages") ?? 2) });
         console.log(`seeded ${n} players`);
@@ -90,7 +95,11 @@ async function main(argv: string[]) {
           }
           console.log(`batch: stored ${r.stored}, failed ${r.failed}`);
           await pool.query(`select infer_match_bands()`);
-          await pool.query(`select refresh_aggregates()`);
+          {
+            // session-level timeout for the one big refresh statement (see model/cli.ts refresh)
+            const c = await pool.connect();
+            try { await c.query("set statement_timeout = '600s'"); await c.query(`select refresh_aggregates()`); } finally { c.release(); }
+          }
           await resolveLogs(pool);
           if (r.stored === 0) { console.log("nic nového, pauza 5 min"); await new Promise((s) => setTimeout(s, 300_000)); }
         }

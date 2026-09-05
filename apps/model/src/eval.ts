@@ -1,3 +1,4 @@
+import { buildAttrIndex } from "./attrIndex.ts";
 import type pg from "pg";
 import type { Platform, Position, TierBand } from "@da/core";
 import type { ModelParams, StatsSource, WinLoss } from "./score.ts";
@@ -94,6 +95,38 @@ export async function loadTrainSource(pool: pg.Pool, scope: EvalScope): Promise<
   }
   const pilotGap = gapDen ? gapNum / gapDen : 0;
 
+  // SPEC-08: attributes (static) and champion-vs-attribute cells from training games only; the
+  // strength baseline inside the expectation is also computed from training games.
+  const attrs = new Map<number, Record<string, string>>();
+  for (const r of (await pool.query<{ champion_id: number; dim: string; value: string }>(`select champion_id, dim, value from champion_attr`)).rows) {
+    const m = attrs.get(r.champion_id) ?? {};
+    m[r.dim] = r.value;
+    attrs.set(r.champion_id, m);
+  }
+  const attrIndex = buildAttrIndex((await pool.query<{ champ_a: number; pos_a: Position; pos_b: Position; dim: string; value: string; games: number; wins: number; exp: string }>(
+    `with s as (
+       select p.champion_id, p.position, (sum(case when p.win then 1 else 0 end) + 250.0) / (count(*) + 500.0) as wr
+       from participant p join match m using (match_id)
+       where m.patch = $1 and m.platform = any($2) and m.game_start < $3 and p.position is not null group by 1, 2),
+     mc as (
+       select a.champion_id champ_a, a.position pos_a, b.champion_id champ_b, b.position pos_b,
+              count(*)::int games, sum(case when a.win then 1 else 0 end)::int wins
+       from participant a join participant b on b.match_id = a.match_id and b.team_id <> a.team_id
+       join match m on m.match_id = a.match_id
+       where m.patch = $1 and m.platform = any($2) and m.game_start < $3 ${bandSql.replace("p.tier_band", "a.tier_band")}
+         and a.position is not null and b.position is not null
+       group by 1, 2, 3, 4)
+     -- the independence expectation is constant within a matchup cell, so aggregate cells, not pairs (see 0012)
+     select mc.champ_a, mc.pos_a, mc.pos_b, t.dim, t.value,
+            sum(mc.games)::int games, sum(mc.wins)::int wins,
+            sum(mc.games * (sa.wr * (1 - sb.wr) / (sa.wr * (1 - sb.wr) + (1 - sa.wr) * sb.wr)))::text exp
+     from mc
+     join champion_attr t on t.champion_id = mc.champ_b
+     join s sa on sa.champion_id = mc.champ_a and sa.position = mc.pos_a
+     join s sb on sb.champion_id = mc.champ_b and sb.position = mc.pos_b
+     group by 1, 2, 3, 4, 5`, params)).rows
+    .map((r) => ({ champ: r.champ_a, posA: r.pos_a, posB: r.pos_b, dim: r.dim, value: r.value, games: r.games, wins: r.wins, expWins: Number(r.exp) })), attrs);
+
   const champions = [...new Set([...strength.keys()].map((k) => Number(k.split(":")[0])))];
   return {
     strength: (c, p) => strength.get(`${c}:${p}`),
@@ -104,6 +137,9 @@ export async function loadTrainSource(pool: pg.Pool, scope: EvalScope): Promise<
     champions: () => champions,
     pilot: (c, p) => pilot.get(`${c}:${p}`),
     pilotGapLogit: () => pilotGap,
+    attrs: (c) => attrs.get(c),
+    vsAttr: attrIndex.vsAttr,
+    vsAttrGroup: attrIndex.vsAttrGroup,
   };
 }
 
@@ -143,7 +179,8 @@ export interface EvalReport {
   trainGames: number;
   testGames: number;
   params: ModelParams;
-  results: Record<keyof typeof VARIANTS, EvalMetrics>;
+  /** VARIANTS plus `full_noattr` (full model with the SPEC-08 attribute prior switched off). */
+  results: Record<string, EvalMetrics>;
 }
 
 export async function runEval(pool: pg.Pool, scope: EvalScope, params: ModelParams = DEFAULT_PARAMS): Promise<EvalReport> {
@@ -153,6 +190,7 @@ export async function runEval(pool: pg.Pool, scope: EvalScope, params: ModelPara
     `select count(*)::text n from match where patch = $1 and platform = any($2) and game_start < $3`, [scope.patch, scope.platforms, scope.cutoff])).rows[0]!.n);
   const results = {} as EvalReport["results"];
   for (const k of Object.keys(VARIANTS) as Array<keyof typeof VARIANTS>) results[k] = evaluateVariant(games, src, params, VARIANTS[k]);
+  if (params.attrWeight > 0) results.full_noattr = evaluateVariant(games, src, { ...params, attrWeight: 0 }, VARIANTS.full);
   return { scope, trainGames, testGames: games.length, params, results };
 }
 
@@ -160,10 +198,12 @@ export async function runEval(pool: pg.Pool, scope: EvalScope, params: ModelPara
 export async function gridSearch(pool: pg.Pool, scope: EvalScope, log = console.log): Promise<{ best: ModelParams; logloss: number; tried: Array<{ params: ModelParams; logloss: number }> }> {
   const src = await loadTrainSource(pool, scope);
   const games = await loadTestGames(pool, scope);
+  // Ranges widened 5. 9. 2026: on 20k games the 2026-08 optimum (M 300 / Y 150, chosen on ~5k
+  // games with maxima 1000 / 500) is over-confident — the best point moved to M 3000 / Y 1500.
   const grid = {
     priorNStrength: [200, 500, 1000],
-    priorNMatchup: [100, 300, 1000],
-    priorNSynergy: [50, 150, 500],
+    priorNMatchup: [300, 1000, 3000, 10000],
+    priorNSynergy: [150, 500, 1500, 5000],
     priorNPlayer: [10, 30, 100],
   };
   const tried: Array<{ params: ModelParams; logloss: number }> = [];
