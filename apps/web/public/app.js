@@ -68,26 +68,36 @@ function readSlots(sel) {
 let scoreTimer;
 function score() { clearTimeout(scoreTimer); scoreTimer = setTimeout(doScore, 150); }
 async function doScore() {
-  const body = { myPos: $("#myPos").value, band: $("#band").value, allies: readSlots("#allies"), enemies: readSlots("#enemies"), bans: readSlots("#bans").map((s) => s.champ), top: 25 };
+  const body = { myPos: $("#myPos").value, band: $("#band").value, allies: readSlots("#allies"), enemies: readSlots("#enemies"), bans: readSlots("#bans").map((s) => s.champ), top: 200 };
   const puuid = $("#puuid").value.trim(); if (puuid) body.myPuuid = puuid;
   const r = await fetch("/api/score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
   if (r.error) { $("#resultMeta").textContent = r.error; return; }
-  $("#resultMeta").textContent = `patch ${r.patch} · pásmo ${r.band} · ${r.candidates} kandidátů`;
+  const classes = new Set(r.recommendations.map((x) => x.class)).size;
+  $("#resultMeta").innerHTML = `patch ${r.patch} · pásmo ${r.band} · ${r.candidates} kandidátů ve ${classes} třídách · průměr pozice ${(r.fieldMean * 100).toFixed(1)} %`
+    + ` · řazeno podle <b>spodní meze intervalu</b> (jistota, ne bodový odhad)`
+    + (r.personalised ? " · <b>osobní</b> (s vaší historií)" : ' · <span class="warn">bez Riot ID = jen populační průměr — vaše vlastní historie je největší rozdíl</span>');
   const ep = Object.entries(r.enemyPositions || {});
   $("#enemyPos").innerHTML = ep.length ? "Odhad pozic soupeřů: " + ep.map(([id, d]) => { const c = champs.find((x) => x.id === Number(id)); const best = Object.entries(d).sort((a, b) => b[1] - a[1])[0]; return `<b>${c?.name ?? id}</b> → ${POS_CS[best[0]]} (${Math.round(best[1] * 100)} %)`; }).join(" · ") : "";
   $("#banRecs").innerHTML = r.bans?.length ? "Doporučené bany (největší očekávaná ztráta pro naše top kandidáty): " + r.bans.slice(0, 5).map((b) => `<b>${b.name}</b> ${(b.expectedLoss * 100).toFixed(1)} (pick ${Math.round(b.pPick * 100)} %)`).join(" · ") : "";
   const KIND = { matchup: "vs", synergy: "+", player: "já", future_matchup: "⌛vs", future_synergy: "⌛+" };
   const min = Math.min(...r.recommendations.map((x) => x.lo), 0.4), max = Math.max(...r.recommendations.map((x) => x.hi), 0.6);
   const pct = (v) => ((v - min) / (max - min) * 100).toFixed(1);
-  $("#recs tbody").innerHTML = r.recommendations.map((x) => `<tr>
+  const STRATUM = { new: "běžný pilot", exp: "zkušený pilot (+)" };
+  // Headline is the difference from the field (the decision-relevant number); the absolute
+  // probability sits beside it. Few games → warning colour; ★ = estimate from the experienced-pilot stratum.
+  $("#recs tbody").innerHTML = r.recommendations.map((x) => {
+    const d = (x.p - r.fieldMean) * 100;
+    const st = x.contributions.find((c) => c.kind === "strength");
+    return `<tr>
     <td><span class="cls c${x.class}">${x.class}</span></td>
     <td class="champ"><img src="${icon(x.key)}" alt=""><a href="#" class="champ-link" data-name="${x.name}">${x.name}</a></td>
-    <td><b>${(x.p * 100).toFixed(1)} %</b></td>
+    <td><b class="${d >= 0 ? "pos" : "neg"}">${d >= 0 ? "+" : ""}${d.toFixed(1)} p.b.</b> <span class="hint">${(x.p * 100).toFixed(1)} %</span></td>
     <td><span class="bar"><i style="left:${pct(x.lo)}%;width:${(pct(x.hi) - pct(x.lo)).toFixed(1)}%"></i><b style="left:${pct(x.p)}%"></b></span>${(x.lo * 100).toFixed(1)}–${(x.hi * 100).toFixed(1)}</td>
-    <td>${x.contributions.find((c) => c.kind === "strength")?.games ?? 0}</td>
+    <td class="${(st?.games ?? 0) < 100 ? "warn" : ""}" title="${st?.stratum ? STRATUM[st.stratum] : ""}">${st?.games ?? 0}${st?.stratum === "exp" ? " ★" : ""}</td>
     <td>${x.contributions.filter((c) => c.kind !== "strength").map((c) => `<span class="term ${c.logOdds >= 0 ? "pos" : "neg"}" title="${c.games} her">${KIND[c.kind]} ${c.vsName ?? ""}${c.vsPos ? " " + POS_CS[c.vsPos] : ""} ${c.logOdds >= 0 ? "+" : ""}${c.logOdds.toFixed(2)}</span>`).join("")}</td>
     <td>${(x.threats || []).slice(0, 3).map((t) => `<span class="term neg" title="pick ${Math.round(t.pPick * 100)} %">${t.name} ${POS_CS[t.pos]} ${t.logOdds.toFixed(2)}</span>`).join("")}</td>
-  </tr>`).join("");
+  </tr>`;
+  }).join("");
   // Champion name jumps to its page — the numbers behind a recommendation are one click away.
   $("#recs").querySelectorAll(".champ-link").forEach((a) => a.addEventListener("click", (e) => {
     e.preventDefault();

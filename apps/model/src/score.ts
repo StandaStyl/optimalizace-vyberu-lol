@@ -14,6 +14,21 @@ export interface ModelParams {
   futureWeight: number;
   /** Future-pick distribution: ignore champions below this pick share on a position (noise cut). */
   futureMinShare: number;
+  /**
+   * Decision rule (SPEC-07 B). "lower" ranks by the lower end of the credible interval, so a
+   * champion with 70 games at 76 % cannot outrank one with 1 100 games at 54 % on the strength
+   * of noise — the classic winner's curse, handled as a decision rule rather than by re-shrinking
+   * the estimates. "mean" is the posterior mean (the old behaviour).
+   */
+  rankBy: "lower" | "mean";
+  /** Post-hoc empirical-Bayes shrinkage of the field (the 26. 8. correction). Kept for evaluation; off by default. */
+  selectionCorrection: boolean;
+  /**
+   * Pilot experience (SPEC-07 C). A player with at least this many games on a champion (in our data)
+   * is "experienced"; measured 2026-09-05: experienced pilots win 54–58 % vs 49.9 % for the rest
+   * (+4.5 p.b. pooled). Strength is estimated within the user's own stratum. 0 disables the split.
+   */
+  pilotExpGames: number;
 }
 export const DEFAULT_PARAMS: ModelParams = {
   priorNStrength: 500,
@@ -25,6 +40,9 @@ export const DEFAULT_PARAMS: ModelParams = {
   mcSamples: 1000,
   futureWeight: 1,
   futureMinShare: 0.01,
+  rankBy: "lower",
+  selectionCorrection: false,
+  pilotExpGames: 10,
 };
 
 export interface WinLoss {
@@ -46,6 +64,13 @@ export interface StatsSource {
   player?(puuid: string, champ: number): (WinLoss & { lastPlayedDaysAgo?: number }) | undefined;
   /** Champions that exist on this patch. */
   champions(): number[];
+  /**
+   * Strength split by pilot experience (SPEC-07 C): games/wins on this champion×position by
+   * players who already had ≥ pilotExpGames games on the champion ("exp") vs the rest ("new").
+   */
+  pilot?(champ: number, pos: Position): { exp: WinLoss; new: WinLoss } | undefined;
+  /** Pooled logit gap experienced − new across all cells (estimated once from the whole table). */
+  pilotGapLogit?(): number;
 }
 
 export interface Slot {
@@ -70,6 +95,8 @@ export interface Contribution {
   /** Log-odds contribution (posterior mean). */
   logOdds: number;
   games: number;
+  /** For the strength term: which pilot stratum the estimate comes from (SPEC-07 C). */
+  stratum?: "new" | "exp";
 }
 
 export interface Threat {
@@ -220,14 +247,35 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
     return posterior(s?.wins ?? 0, (s?.games ?? 0) - (s?.wins ?? 0), 0.5, params.priorNStrength);
   };
 
+  /**
+   * Strength of a candidate for THIS user (SPEC-07 C): estimated within the user's pilot stratum.
+   * Population win rate is dominated by non-specialists, so an anonymous or inexperienced user gets
+   * the "new" cell. An experienced user gets the sparse "exp" cell with its prior centred on the
+   * new-pilot rate shifted by the pooled gap — the pooled +4.5 p.b. speaks before the champion's
+   * own experienced-pilot games do (hierarchical prior), and the player term H then deviates from
+   * this stratum base rather than from the population average.
+   */
+  const candidateStrength = (champ: number, pos: Position): { post: BetaPosterior; games: number; stratum: "all" | "new" | "exp" } => {
+    const split = params.pilotExpGames > 0 ? src.pilot?.(champ, pos) : undefined;
+    if (!split) {
+      return { post: strengthOf(champ, pos), games: src.strength(champ, pos)?.games ?? 0, stratum: "all" };
+    }
+    const newPost = posterior(split.new.wins, split.new.games - split.new.wins, 0.5, params.priorNStrength);
+    const myGames = state.myPuuid && src.player ? (src.player(state.myPuuid, champ)?.games ?? 0) : 0;
+    if (myGames < params.pilotExpGames) return { post: newPost, games: split.new.games, stratum: "new" };
+    const priorMean = sigmoid(logit(mean(newPost)) + (src.pilotGapLogit?.() ?? 0));
+    return { post: posterior(split.exp.wins, split.exp.games - split.exp.wins, priorMean, params.priorNStrength), games: split.exp.games, stratum: "exp" };
+  };
+
   for (const champ of src.champions()) {
     if (taken.has(champ)) continue;
-    const sMe = strengthOf(champ, state.myPos);
     if (!playedOnPosition(champ, state.myPos, src)) continue; // thesis rule, tightened: a real pick on this position, not a one-off
+    const cs = candidateStrength(champ, state.myPos);
+    const sMe = cs.post;
 
     const terms: Array<{ c: Contribution; post: BetaPosterior | null; expectedLogit: number; weight: number; sVar: number }> = [];
-    const sGames = src.strength(champ, state.myPos)?.games ?? 0;
-    terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: sGames }, post: sMe, expectedLogit: 0, weight: 1, sVar: samplingVar(sGames, mean(sMe), params.priorNStrength) });
+    const sGames = cs.games;
+    terms.push({ c: { kind: "strength", logOdds: logit(mean(sMe)), games: sGames, ...(cs.stratum === "all" ? {} : { stratum: cs.stratum }) }, post: sMe, expectedLogit: 0, weight: 1, sVar: samplingVar(sGames, mean(sMe), params.priorNStrength) });
 
     // Counters vs each enemy: expectation over their inferred positions.
     for (const e of state.enemies) {
@@ -318,22 +366,25 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
     out.push({ champ, p: sigmoid(point), lo: quantile(samples, tail), hi: quantile(samples, 1 - tail), contributions: terms.map((t) => t.c), threats: threats.slice(0, 5) });
   }
 
-  // Winner's-curse correction (HANDOVER bod 2): the top of the list is the max of ~dozens of
-  // noisy estimates, so its p is biased up (replay: rank-1 meanP 57 % vs realised 49 %).
-  // Shrink every candidate towards the field mean, more when its own posterior is wide;
-  // the same monotone map is applied to lo/hi, so quantiles stay exact.
-  if (out.length >= 5) {
+  // Optional post-hoc empirical-Bayes shrinkage of the field (the 26. 8. correction, v2).
+  // Kept selectable for evaluation. Its noise model is the sampling variance of the *shrunk*
+  // estimator, which is smallest exactly for few-game candidates — so it under-corrects the
+  // small-sample outlier at the top (Tryndamere mid: 71 games at 76 % ranked above Lux with
+  // 1 109 games). SPEC-07 B handles that case as a decision rule instead: see the sort below.
+  if (params.selectionCorrection && out.length >= 5) {
     const { mu, lambda } = ebShrink(out.map((r) => logit(r.p)), estVar);
     out.forEach((r, i) => {
       const x = logit(r.p);
       const xNew = mu + lambda[i]! * (x - mu);
-      // Translate the interval with the point. Its width is epistemic (posterior), which the
-      // selection correction does not reduce — only the point estimate is de-biased.
       r.lo = sigmoid(logit(r.lo) + (xNew - x));
       r.hi = sigmoid(logit(r.hi) + (xNew - x));
       r.p = sigmoid(xNew);
     });
   }
+  // Decision rule (SPEC-07 B): rank by the lower credible bound — "how good is this pick at
+  // worst, given what we know" — so a wide-interval candidate needs a genuinely higher point
+  // estimate to lead. The point estimate p is still reported; only the order changes.
+  if (params.rankBy === "lower") return out.sort((a, b) => b.lo - a.lo || b.p - a.p);
   return out.sort((a, b) => b.p - a.p);
 }
 

@@ -117,3 +117,60 @@ describe("scoreDraft", () => {
     expect(classes).toEqual([[1, 2], [3]]);
   });
 });
+
+describe("SPEC-07: decision rule and pilot stratification", () => {
+  /** Two ADCs: 1 = 2 000 games at 54 %; 7 = 40 games at 75 % (small-sample outlier). Support 5 fills the lobby. */
+  function world7(): StatsSource {
+    const wl = (games: number, wr: number): WinLoss => ({ games, wins: Math.round(games * wr) });
+    const strength: Record<string, WinLoss> = { "1:BOTTOM": wl(2000, 0.54), "7:BOTTOM": wl(40, 0.75), "5:UTILITY": wl(2000, 0.5) };
+    const prior: Record<number, Partial<Record<Position, number>>> = { 1: { BOTTOM: 2000 }, 7: { BOTTOM: 40 }, 5: { UTILITY: 2000 } };
+    // Pilot split for champ 1: experienced pilots win more, as measured on real data.
+    const pilot: Record<string, { exp: WinLoss; new: WinLoss }> = { "1:BOTTOM": { exp: wl(60, 0.62), new: wl(1940, 0.5375) } };
+    return {
+      strength: (c, p) => strength[`${c}:${p}`],
+      matchup: () => undefined, synergy: () => undefined,
+      positionPrior: (c) => prior[c],
+      player: (puuid, c) => (puuid === "vet" && c === 1 ? { games: 15, wins: 9, lastPlayedDaysAgo: 3 } : undefined),
+      champions: () => [1, 5, 7],
+      pilot: (c, p) => pilot[`${c}:${p}`],
+      pilotGapLogit: () => 0.18, // ≈ +4.5 p.b. at 50 %
+    };
+  }
+  const base = { ...DEFAULT_PARAMS, mcSamples: 400, priorNStrength: 100, futureWeight: 0, pilotExpGames: 0 };
+  const draft = { myPos: "BOTTOM" as const, allies: [], enemies: [], bans: [] };
+
+  it("B: ranking by the lower bound puts the well-estimated champion first; by the mean the outlier leads", () => {
+    const byMean = scoreDraft(draft, world7(), { ...base, rankBy: "mean" });
+    const byLower = scoreDraft(draft, world7(), { ...base, rankBy: "lower" });
+    expect(byMean[0]!.champ).toBe(7);           // 40 games at 75 % has the higher point estimate…
+    expect(byLower[0]!.champ).toBe(1);          // …but a much wider interval, so it does not lead on certainty
+    const c7 = byLower.find((r) => r.champ === 7)!, c1 = byLower.find((r) => r.champ === 1)!;
+    expect(c7.p).toBeGreaterThan(c1.p);
+    expect(c7.lo).toBeLessThan(c1.lo);
+    expect(c7.hi - c7.lo).toBeGreaterThan(c1.hi - c1.lo);
+  });
+
+  it("C: an anonymous user gets the new-pilot stratum, an experienced pilot gets the shifted stratum", () => {
+    const withPilot = { ...base, pilotExpGames: 10 };
+    const anon = scoreDraft(draft, world7(), withPilot).find((r) => r.champ === 1)!;
+    const vet = scoreDraft({ ...draft, myPuuid: "vet" }, world7(), withPilot).find((r) => r.champ === 1)!;
+    const sAnon = anon.contributions.find((c) => c.kind === "strength")!;
+    const sVet = vet.contributions.find((c) => c.kind === "strength")!;
+    expect(sAnon.stratum).toBe("new");
+    expect(sVet.stratum).toBe("exp");
+    // The pooled gap (0.18 logit) speaks before the champion's 60 experienced games do.
+    expect(sVet.logOdds - sAnon.logOdds).toBeGreaterThan(0.1);
+    expect(vet.p).toBeGreaterThan(anon.p);
+    // Without the split (pilotExpGames = 0) the stratum is not reported and the estimate is the pooled one.
+    const pooled = scoreDraft(draft, world7(), base).find((r) => r.champ === 1)!;
+    expect(pooled.contributions.find((c) => c.kind === "strength")!.stratum).toBeUndefined();
+  });
+
+  it("C: the player term deviates from the stratum base, not from the population average", () => {
+    const withPilot = { ...base, pilotExpGames: 10 };
+    const vet = scoreDraft({ ...draft, myPuuid: "vet" }, world7(), withPilot).find((r) => r.champ === 1)!;
+    const h = vet.contributions.find((c) => c.kind === "player")!;
+    // "vet" is 9/15 = 60 %, roughly the experienced-stratum base (~57–58 %): a small positive deviation, not the ~+6 p.b. it would be against the 54 % population rate.
+    expect(Math.abs(h.logOdds)).toBeLessThan(0.15);
+  });
+});

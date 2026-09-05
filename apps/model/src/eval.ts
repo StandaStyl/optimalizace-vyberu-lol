@@ -4,6 +4,7 @@ import type { ModelParams, StatsSource, WinLoss } from "./score.ts";
 import { DEFAULT_PARAMS } from "./score.ts";
 import { teamWinProb, VARIANTS, type TeamSlot, type TermWeights } from "./team.ts";
 import { evaluate, type EvalMetrics } from "./metrics.ts";
+import { logit } from "./stats.ts";
 
 export interface EvalScope {
   patch: string;
@@ -71,6 +72,28 @@ export async function loadTrainSource(pool: pg.Pool, scope: EvalScope): Promise<
     prior.set(r.champion_id, m);
   }
 
+  // SPEC-07 C: pilot-experience split, leak-free — a pilot's game count uses training games only.
+  const pilot = new Map<string, { exp: WinLoss; new: WinLoss }>();
+  let gapNum = 0, gapDen = 0;
+  for (const r of (await pool.query<{ champion_id: number; position: Position; ge: number; we: number; gn: number; wn: number }>(
+    `with pg as (
+       select p.puuid, p.champion_id, count(*) n from participant p join match m using (match_id)
+       where m.game_start < $3 group by 1,2)
+     select p.champion_id, p.position,
+            count(*) filter (where pg.n >= 10)::int ge, sum(case when pg.n >= 10 and p.win then 1 else 0 end)::int we,
+            count(*) filter (where pg.n < 10)::int gn,  sum(case when pg.n < 10 and p.win then 1 else 0 end)::int wn
+     from participant p join match m using (match_id) join pg using (puuid, champion_id)
+     where m.patch = $1 and m.platform = any($2) and m.game_start < $3 ${bandSql} and p.position is not null
+     group by 1,2`, params)).rows) {
+    pilot.set(`${r.champion_id}:${r.position}`, { exp: { games: r.ge, wins: r.we }, new: { games: r.gn, wins: r.wn } });
+    if (r.ge >= 20 && r.gn >= 20) {
+      const w = Math.min(r.ge, r.gn);
+      gapNum += w * (logit(r.we / r.ge) - logit(r.wn / r.gn));
+      gapDen += w;
+    }
+  }
+  const pilotGap = gapDen ? gapNum / gapDen : 0;
+
   const champions = [...new Set([...strength.keys()].map((k) => Number(k.split(":")[0])))];
   return {
     strength: (c, p) => strength.get(`${c}:${p}`),
@@ -79,6 +102,8 @@ export async function loadTrainSource(pool: pg.Pool, scope: EvalScope): Promise<
     positionPrior: (c) => prior.get(c),
     player: (puuid, c) => player.get(`${puuid}:${c}`),
     champions: () => champions,
+    pilot: (c, p) => pilot.get(`${c}:${p}`),
+    pilotGapLogit: () => pilotGap,
   };
 }
 

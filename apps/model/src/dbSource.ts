@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { Platform, Position, TierBand } from "@da/core";
 import type { StatsSource, WinLoss } from "./score.ts";
+import { logit } from "./stats.ts";
 
 export interface LoadScope {
   patch: string;
@@ -53,6 +54,23 @@ export async function loadStatsSource(pool: pg.Pool, scope: LoadScope): Promise<
     prior.set(r.champion_id, m);
   }
 
+  // SPEC-07 C: strength split by pilot experience, plus the pooled experienced−new gap.
+  // The gap is a weight-averaged per-cell logit difference (cells with ≥20 games on each side),
+  // so it is not confounded by which champions specialists favour.
+  const pilot = new Map<string, { exp: WinLoss; new: WinLoss }>();
+  let gapNum = 0, gapDen = 0;
+  for (const r of (await pool.query<{ champion_id: number; position: Position; ge: number; we: number; gn: number; wn: number }>(
+    `select champion_id, position, sum(games_exp)::int ge, sum(wins_exp)::int we, sum(games_new)::int gn, sum(wins_new)::int wn
+     from mat_champ_pos_pilot where patch = $1 and platform = any($2) ${bandSql} and position is not null group by 1,2`, params)).rows) {
+    pilot.set(`${r.champion_id}:${r.position}`, { exp: { games: r.ge, wins: r.we }, new: { games: r.gn, wins: r.wn } });
+    if (r.ge >= 20 && r.gn >= 20) {
+      const w = Math.min(r.ge, r.gn);
+      gapNum += w * (logit(r.we / r.ge) - logit(r.wn / r.gn));
+      gapDen += w;
+    }
+  }
+  const pilotGap = gapDen ? gapNum / gapDen : 0;
+
   const champions = (await pool.query<{ champion_id: number }>(`select champion_id from champion order by 1`)).rows.map((r) => r.champion_id);
 
   // Player history is queried lazily (one player per request) and cached for the life of this source.
@@ -77,6 +95,8 @@ export async function loadStatsSource(pool: pg.Pool, scope: LoadScope): Promise<
     positionPrior: (c) => prior.get(c),
     player: (puuid, c) => playerCache.get(puuid)?.get(c),
     champions: () => champions,
+    pilot: (c, p) => pilot.get(`${c}:${p}`),
+    pilotGapLogit: () => pilotGap,
     preloadPlayer: loadPlayer,
   };
 }

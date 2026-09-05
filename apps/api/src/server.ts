@@ -82,7 +82,10 @@ export function createApi(opts: ApiOptions) {
         const classes = indifferenceClasses(recs);
         const classOf = new Map<number, number>(); classes.forEach((cl, i) => cl.forEach((ch) => classOf.set(ch, i + 1)));
         const enemyPositions = Object.fromEntries([...inferEnemyPositions(state.enemies, src)].map(([k, v]) => [k, v]));
-        const top = Math.min(Number(body.top ?? 20), 60);
+        // SPEC-07 A: the whole list may be asked for (the tail is where the "avoid" information is),
+        // and the decision-relevant number is the difference from the field, so ship the field mean.
+        const top = Math.min(Number(body.top ?? 20), 200);
+        const fieldMean = recs.length ? recs.reduce((a, r) => a + r.p, 0) / recs.length : 0.5;
         const nm = (id: number) => c.names.get(id)?.name ?? String(id);
         const bans = recommendBans(state, recs, src, DEFAULT_PARAMS).map((b) => ({ ...b, name: nm(b.champ), key: c.names.get(b.champ)?.key }));
         const recommendations = recs.slice(0, top).map((r) => ({ champ: r.champ, name: nm(r.champ), key: c.names.get(r.champ)?.key, class: classOf.get(r.champ), p: r.p, lo: r.lo, hi: r.hi,
@@ -103,6 +106,7 @@ export function createApi(opts: ApiOptions) {
 
         return json(res, 200, {
           patch: c.patch, band: src.scope.tierBand ?? "all", myPos: state.myPos, candidates: recs.length, enemyPositions,
+          fieldMean, rankedBy: DEFAULT_PARAMS.rankBy, personalised: !!state.myPuuid,
           recommendations, bans, ...(logId === undefined ? {} : { logId }),
         });
       }

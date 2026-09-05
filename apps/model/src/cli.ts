@@ -7,7 +7,7 @@ import { runReplay } from "./replay.ts";
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
   eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
-  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--persist]   retrospective draft replay (reality check)
+  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb] [--pilot N] [--persist]   retrospective draft replay (reality check)
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -52,6 +52,15 @@ async function main(argv: string[]) {
         if (ns.length !== 4 || ns.some((x) => !Number.isFinite(x) || x <= 0)) throw new Error("--priors očekává S,M,Y,H (čtyři kladná čísla, např. 1000,1000,500,100)");
         params = { ...DEFAULT_PARAMS, priorNStrength: ns[0]!, priorNMatchup: ns[1]!, priorNSynergy: ns[2]!, priorNPlayer: ns[3]! };
       }
+      // SPEC-07 switches, so the replay can compare decision rules and the pilot stratification.
+      const rank = arg(argv, "--rank");
+      if (rank) {
+        if (rank !== "lower" && rank !== "mean") throw new Error("--rank očekává lower | mean");
+        params = { ...params, rankBy: rank };
+      }
+      if (argv.includes("--eb")) params = { ...params, selectionCorrection: true };
+      const pilotArg = arg(argv, "--pilot");
+      if (pilotArg !== undefined) params = { ...params, pilotExpGames: Number(pilotArg) };
       const { report } = await runReplay(pool, scope, params, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
       console.log(`replay: ${report.games} games, ${report.picks} picks, coverage ${(report.coverage * 100).toFixed(1)} %`);
       console.log(`lift: class 1 WR ${(report.lift.class1.wr * 100).toFixed(1)} % (n=${report.lift.class1.n}) vs other ${(report.lift.other.wr * 100).toFixed(1)} % (n=${report.lift.other.n}) → ${(report.lift.diff * 100).toFixed(1)} p.b.`);
