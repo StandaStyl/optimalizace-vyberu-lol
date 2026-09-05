@@ -136,7 +136,7 @@ describe("SPEC-07: decision rule and pilot stratification", () => {
       pilotGapLogit: () => 0.18, // ≈ +4.5 p.b. at 50 %
     };
   }
-  const base = { ...DEFAULT_PARAMS, mcSamples: 400, priorNStrength: 100, futureWeight: 0, pilotExpGames: 0 };
+  const base = { ...DEFAULT_PARAMS, mcSamples: 400, priorNStrength: 100, futureWeight: 0, pilotExpGames: 0, selectionCorrection: false };
   const draft = { myPos: "BOTTOM" as const, allies: [], enemies: [], bans: [] };
 
   it("B: ranking by the lower bound puts the well-estimated champion first; by the mean the outlier leads", () => {

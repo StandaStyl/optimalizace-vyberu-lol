@@ -4,6 +4,18 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 5. 9. 2026 — Restart API se špatným vstupním bodem: proces tiše umřel, logy prázdné
+
+**Co se stalo:** při restartu API po změně výchozích parametrů jsem spustil `apps/api/src/server.ts`
+místo `apps/api/src/index.ts` (a psal do `api.err.log` místo `api.err`). Proces skončil okamžitě,
+oba logy zůstaly prázdné, `curl` vrátil `000` za 2,2 s (odmítnuté spojení) — vypadalo to jako „API
+ještě startuje".
+
+**Řešení:** před `Start-Process` vždy vzít příkaz z `package.json` (`npm run api`) nebo z
+HANDOVER §3, nevymýšlet cestu z hlavy. Diagnostika: `tasklist //FI "PID eq N"` hned po startu; když
+proces zmizel a logy jsou prázdné, je to skoro vždy špatný vstupní bod nebo chybějící `.env`, ne
+pomalý start. Ověření funkčnosti = `http_code 200` **a** smysluplná odpověď, ne jen otevřený port.
+
 ## 5. 9. 2026 — „Všechno je kolem 50 %": čtyři různé příčiny, jen jedna byla chyba
 
 **Co se stalo:** doporučení vypadala bezcenná (52,6 % vs. 49,9 %, všichni v jedné třídě). Rozbor

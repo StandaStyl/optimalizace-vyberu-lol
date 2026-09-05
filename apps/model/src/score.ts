@@ -21,7 +21,12 @@ export interface ModelParams {
    * the estimates. "mean" is the posterior mean (the old behaviour).
    */
   rankBy: "lower" | "mean";
-  /** Post-hoc empirical-Bayes shrinkage of the field (the 26. 8. correction). Kept for evaluation; off by default. */
+  /**
+   * Post-hoc empirical-Bayes shrinkage of the field (the 26. 8. correction). Its noise model
+   * mis-targets the small-sample outlier (handled by rankBy "lower"), but as a calibration layer
+   * for the displayed p it is the best-measured variant: replay 5. 9. 2026, ECE 0.0002 and
+   * log-loss 0.69253 with it vs 0.0096–0.0117 / 0.69304 without (SPEC-07 §Měření).
+   */
   selectionCorrection: boolean;
   /**
    * Pilot experience (SPEC-07 C). A player with at least this many games on a champion (in our data)
@@ -41,7 +46,7 @@ export const DEFAULT_PARAMS: ModelParams = {
   futureWeight: 1,
   futureMinShare: 0.01,
   rankBy: "lower",
-  selectionCorrection: false,
+  selectionCorrection: true,
   pilotExpGames: 10,
 };
 

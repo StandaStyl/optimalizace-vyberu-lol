@@ -33,7 +33,9 @@ Je to chyba, nebo pravda?"* Rozbor na 25 tisících her (patch 16.16) dal čtyř
 - `rankBy: "lower"` — pořadí podle 10. percentilu posterioru P(výhra), nikoli podle středu. Bodový odhad
   se zobrazuje dál; mění se jen pořadí. Kandidát se širokým intervalem musí mít o to vyšší střed, aby vedl.
 - Je to *rozhodovací pravidlo* (lower confidence bound), ne úprava odhadů — drží pravdu.
-- EB korekce v2 zůstává jako přepínač `selectionCorrection` (výchozí vypnuto) kvůli srovnání v replay.
+- EB korekce v2 zůstává jako přepínač `selectionCorrection`. Původně vypnuta; **po doměření (níže) znovu
+  zapnuta jako výchozí** — ne proto, že by správně mířila na rozptyl outliera (to řeší B), ale protože jako
+  kalibrační vrstva nad *celým* žebříčkem dává nejlepší měřenou kalibraci. Replay: `--eb` / `--no-eb`.
 - Třídy indiference beze změny (překryv intervalů s lídrem).
 
 ### C. Zkušenost pilota jako stratum síly
@@ -57,14 +59,28 @@ Je to chyba, nebo pravda?"* Rozbor na 25 tisících her (patch 16.16) dal čtyř
 |---|---|---|---|---|
 | původní (mean + EB v2) | 31 / 41,9 % / 52,9 % | +1,9 p.b. | 0,0132 | 0,69275 |
 | B (lower, bez EB) | **180** / 48,9 % / 56,8 % | 0,0 | 0,0117 | 0,69305 |
-| B + C (lower, pilot 10) | **170** / 52,9 % / 56,8 % | +1,6 p.b. | **0,0110** | 0,69307 |
+| B + C (lower, pilot 10) | **170** / 52,9 % / 56,8 % | +1,6 p.b. | 0,0110 | 0,69307 |
+| B + C, H = 100 | 182 / 50,5 % / 56,9 % | +1,8 p.b. | 0,0096 | 0,69304 |
+| B + C, H = 300 | 190 / 53,7 % / 56,5 % | +3,6 p.b. | 0,0178 | 0,69359 |
+| **B + C + EB v2, H = 30** | 157 / 56,1 % / 51,3 % | +3,1 p.b. | **0,0002** | **0,69253** |
 
 Čtení: B zšestinásobilo *relevanci* špičky (hráči skutečně volí model-rank-1 v 3,6 % picků místo 0,6 %) —
 špička už není 71herní outlier. Celková kalibrace mírně lepší, log-loss v šumu (rozdíly 0,0003). **Ale
 bodový odhad u ranku 1 je nadhodnocený o ~4–8 p.b.** (56,8 % predikováno vs. 49–53 % realita) — EB vrstva
-tuhle práci dělala, byť špatným nástrojem. Kandidáti na příčinu: hráčský člen H s `priorNPlayer = 30`
-(v replay má každý pick puuid, a rank-1 je často „hraju svého maina") a/nebo síla prioru 500. Doměřuje se
-(H = 100, 300; kombinace s EB) — výsledky doplnit sem.
+tuhle práci dělala, byť špatným nástrojem.
+
+**Doměřeno 5. 9. (řádky H = 100 / 300 / EB):**
+- Hráčský člen **není** příčina nadhodnocení: H = 30 → 100 nechá rank 1 na 56,9 % predikce vs. ~50,5 %
+  realita; H = 300 zhorší všechno (ECE 0,0178, log-loss nad konstantním modelem 0,69315).
+- Příčina je **selekce maxima**: ~100 kandidátů, každý se součtem ~13 situačních členů (matchupy přes
+  25 kombinací pozic + synergie), každý člen sám kalibrovaný, jejich maximum ne. To je přesně to, co
+  EB korekce přes kandidáty modeluje — proto **B + C + EB** vychází nejlépe: ECE 0,0002, log-loss
+  0,69253 (jediná varianta pod const 0,69315), rank 26+ 49,6 vs. 49,5 %. Rank 1 tam skončí
+  *podhodnocený* (realita 56,1 vs. predikce 51,3 %, n = 157 → ±8 p.b., tj. v šumu) — konzervativní
+  směr, který je pro doporučení bezpečnější než nadhodnocení.
+- **Rozhodnutí:** `selectionCorrection: true` výchozí; `rankBy: "lower"` zůstává (řeší 71herní outlier,
+  EB ho neřešila); `pilotExpGames: 10`; priory beze změny (S 500, M 300, Y 150, H 30). Bod D (empirický
+  selekční diskont v UI) tím ztrácí naléhavost — rank 1 už není nadhodnocený.
 
 ## Co by bylo nepoctivé (a nedělá se)
 - Zeslabit priory, aby se čísla rozestoupila (hierarchický odhad implikuje prior ≈ 400–500 her — je správně).

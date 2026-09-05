@@ -7,7 +7,7 @@ import { runReplay } from "./replay.ts";
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
   eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
-  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb] [--pilot N] [--persist]   retrospective draft replay (reality check)
+  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb|--no-eb] [--pilot N] [--persist]   retrospective draft replay (reality check)
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -59,6 +59,7 @@ async function main(argv: string[]) {
         params = { ...params, rankBy: rank };
       }
       if (argv.includes("--eb")) params = { ...params, selectionCorrection: true };
+      if (argv.includes("--no-eb")) params = { ...params, selectionCorrection: false };
       const pilotArg = arg(argv, "--pilot");
       if (pilotArg !== undefined) params = { ...params, pilotExpGames: Number(pilotArg) };
       const { report } = await runReplay(pool, scope, params, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});

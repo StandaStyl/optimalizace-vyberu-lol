@@ -172,23 +172,23 @@ Přečti nejdřív [`docs/specs/SPEC-07`](specs/SPEC-07-rozhodovaci-pravidlo-a-p
 rozbor otázky „proč je všechno kolem 50 %" i s čísly.
 
 **Změněno (commit 8fb0e2e):**
-- Model: `rankBy: "lower"` (řazení podle 10. percentilu posterioru), `selectionCorrection: false`
-  (EB v2 jen jako přepínač pro replay), `pilotExpGames: 10` (síla ve stratu uživatele; migrace 0010,
+- Model: `rankBy: "lower"` (řazení podle 10. percentilu posterioru), `selectionCorrection: true`
+  (EB v2 — nejdřív vypnuta, po doměření vrácena jako kalibrační vrstva; replay `--eb`/`--no-eb`), `pilotExpGames: 10` (síla ve stratu uživatele; migrace 0010,
   tabulka `mat_champ_pos_pilot`, pooled mezera +4,5 p.b. jako hierarchický prior).
 - API `/api/score`: `top` až 200 (dřív strop 60 skrýval dno žebříčku), nově `fieldMean`, `rankedBy`,
   `personalised`; příspěvek síly nese `stratum`.
 - UI: hlavní číslo = Δ vs. průměr pozice, varování u < 100 her, ★ u zkušeného pilota, hláška
   „bez Riot ID = jen populační průměr".
-- Replay: přepínače `--rank lower|mean`, `--eb`, `--pilot N`, `--priors S,M,Y,H`.
+- Replay: přepínače `--rank lower|mean`, `--eb|--no-eb`, `--pilot N`, `--priors S,M,Y,H`.
 
 **Změřeno (replay 500 her, patch 16.16):**
 - Řazení podle spodní meze: rank 1 volí hráči v 3,6 % picků (dřív 0,6 %) — špička je relevantní.
 - Kalibrace celkem dobrá (ECE 0,0096 s H = 100; rank 26+: predikce 48,1 = realita 48,1 %).
-- **Otevřený bod D: rank 1 je nadhodnocený o ~6 p.b.** (predikce 56,9 %, realita ~50,5 %, n ≈ 180).
-  Není to hráčský člen (H = 30 → 100 beze změny). Je to selekce maxima z ~100 kandidátů nad součtem
-  ~13 situačních členů (matchupy + synergie) — každý sám kalibrovaný, jejich maximum ne. Návrh:
-  **empirický „selekční diskont" po rank-bucketech z replay** zobrazený v UI jako informace
-  („historicky rank 1 dodal X % při predikci Y %"), ne zásah do modelu. Čeká na potvrzení.
+- **Bod D (rank 1 nadhodnocený o ~6 p.b. bez EB) — vyřešeno zapnutím EB v2 jako výchozí.** Příčina
+  byla selekce maxima z ~100 kandidátů (H = 30 → 100 beze změny, H = 300 vše zhorší). B + C + EB:
+  ECE 0,0002, log-loss 0,69253 (jediná varianta pod const), rank 1 realita 56,1 vs. predikce 51,3 %
+  (n = 157, v šumu, konzervativní směr). Volitelný doplněk „historicky rank 1 dodal X % při predikci
+  Y %" v UI zůstává jen jako nápad, už není nutný.
 - Pilot (C) zatím jen v šumu (rank 1: 48,9 → 52,9 %, n 180/170; lift 0 → +1,6 p.b.), směr správný.
 
 **Data:** patch **16.17** vyšel ~3. 9.; crawler už má 2 398 her z 16.17. API bere patch s nejvíc hrami
