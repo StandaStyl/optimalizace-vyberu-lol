@@ -4,6 +4,43 @@
 > jak se řeší. Nejnovější nahoru, zápisy se nemažou. Obecná poučení (shell, Windows,
 > OneDrive, Git) patří do `~/.claude/PONAUCENI.md`.
 
+## 5. 9. 2026 — „Všechno je kolem 50 %": čtyři různé příčiny, jen jedna byla chyba
+
+**Co se stalo:** doporučení vypadala bezcenná (52,6 % vs. 49,9 %, všichni v jedné třídě). Rozbor
+na 25 tis. her ukázal, že se sčítají čtyři věci s různou povahou: (1) pravda — 80 % šampionů má
+syrovou WR mezi 46,5 a 52,6 %, Riot na to vyvažuje; (2) hlad po datech — z 125 652 matchup buněk
+má ≥ 100 her jen 1 024, countery jsou shrinkage správně utlumené k nule; (3) UI — API vracelo max
+60 ze ~100 kandidátů, dno žebříčku (Sylas 45,8 %, Azir 44,6 %) nikdo neviděl; (4) skutečný defekt —
+EB korekce winner's curse v2 používá rozptyl *zregularizovaného* odhadu, který je u šampiona s málo
+hrami nejmenší, takže Tryndamere (71 her, 76 %) zůstal rank 1 nad Luxem (1 109 her).
+
+**Řešení:** nikdy nesahat na priory „aby se čísla rozestoupila" — nejdřív změřit syrový rozptyl,
+pokrytí buněk a strop API, teprve pak model. Winner's curse řešit **rozhodovacím pravidlem** (řadit
+podle spodní meze intervalu), ne další vrstvou shrinkage; bodový odhad nechat nedotčený a ukazovat
+rozdíl proti průměru pozice, ne absolutní procento. Poučení: **„plochý" výstup je často správná
+odpověď na správnou otázku špatně položenou v UI — a dvě vrstvy konzervativnosti (prior + EB) se
+násobí, každá sama o sobě obhajitelná.**
+
+## 5. 9. 2026 — Replay ukázal, že rank-1 skoro nikdo nehraje; lift ranku 1 je tím pádem šum
+
+**Co se stalo:** interpretoval jsem „rank-1 WR 69,6 %" jako důkaz kvality — n bylo 23 z 5 000
+picků. Při řazení podle středu je rank 1 malovzorkový outlier, kterého hráči nevolí (0,6 % picků).
+Po přechodu na spodní mez vzrostlo pokrytí ranku 1 na 180 picků (3,6 %) a realizovaná WR klesla na
+48,9–52,9 % proti predikci 56,8 %.
+
+**Řešení:** u replay metrik vždy číst nejdřív **n**, pak procento; lift na ranku 1 hlásit jen s
+intervalem. Nadhodnocení predikce u ranku 1 (~5 p.b.) je otevřený bod — kandidát je hráčský člen H
+(`priorNPlayer = 30` při ~20 hrách na hráče ve vzorku), doměřuje se s H = 100 / 300.
+
+## 5. 9. 2026 — Editace dlouhé šablony v `app.js` jedním Edit: zdvojený blok, syntakticky platný
+
+**Co se stalo:** při přepisu řádku tabulky jsem do `new_string` omylem vložil `.join("") &&
+r.recommendations.map(...)` a celý blok dvakrát; soubor zůstal syntakticky platný (`&&` je legální),
+takže by chyba prošla až do prohlížeče jako prázdná tabulka.
+
+**Řešení:** dlouhé šablony editovat po menších kusech, po každé editaci `node --check` **a** ověřit
+v prohlížeči, že se vykreslí očekávaný počet řádků. Syntaktická platnost není důkaz správnosti.
+
 ## 26. 8. 2026 — EB korekce winner's curse: šum je výběrový rozptyl odhadu, ne šířka posterioru
 
 **Co se stalo:** první verze korekce (shrinkage kandidátů k průměru pole) použila jako šumový

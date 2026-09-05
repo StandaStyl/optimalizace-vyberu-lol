@@ -165,3 +165,40 @@ Detailně v [`PONAUCENI.md`](../PONAUCENI.md). Nejdůležitější:
 - V routeru konkrétní cesty před prefixové.
 - Změny schématu jen migracemi v repu (vlastníkem objektů je `draft_ingest`).
 - Delší úpravy souborů psát jako `.cjs` skript, ne inline `node -e` z Bashe.
+
+## 5b. Stav 5. 9. 2026 (SPEC-07 a otevřené body)
+
+Přečti nejdřív [`docs/specs/SPEC-07`](specs/SPEC-07-rozhodovaci-pravidlo-a-pilot.md) — je tam celý
+rozbor otázky „proč je všechno kolem 50 %" i s čísly.
+
+**Změněno (commit 8fb0e2e):**
+- Model: `rankBy: "lower"` (řazení podle 10. percentilu posterioru), `selectionCorrection: false`
+  (EB v2 jen jako přepínač pro replay), `pilotExpGames: 10` (síla ve stratu uživatele; migrace 0010,
+  tabulka `mat_champ_pos_pilot`, pooled mezera +4,5 p.b. jako hierarchický prior).
+- API `/api/score`: `top` až 200 (dřív strop 60 skrýval dno žebříčku), nově `fieldMean`, `rankedBy`,
+  `personalised`; příspěvek síly nese `stratum`.
+- UI: hlavní číslo = Δ vs. průměr pozice, varování u < 100 her, ★ u zkušeného pilota, hláška
+  „bez Riot ID = jen populační průměr".
+- Replay: přepínače `--rank lower|mean`, `--eb`, `--pilot N`, `--priors S,M,Y,H`.
+
+**Změřeno (replay 500 her, patch 16.16):**
+- Řazení podle spodní meze: rank 1 volí hráči v 3,6 % picků (dřív 0,6 %) — špička je relevantní.
+- Kalibrace celkem dobrá (ECE 0,0096 s H = 100; rank 26+: predikce 48,1 = realita 48,1 %).
+- **Otevřený bod D: rank 1 je nadhodnocený o ~6 p.b.** (predikce 56,9 %, realita ~50,5 %, n ≈ 180).
+  Není to hráčský člen (H = 30 → 100 beze změny). Je to selekce maxima z ~100 kandidátů nad součtem
+  ~13 situačních členů (matchupy + synergie) — každý sám kalibrovaný, jejich maximum ne. Návrh:
+  **empirický „selekční diskont" po rank-bucketech z replay** zobrazený v UI jako informace
+  („historicky rank 1 dodal X % při predikci Y %"), ne zásah do modelu. Čeká na potvrzení.
+- Pilot (C) zatím jen v šumu (rank 1: 48,9 → 52,9 %, n 180/170; lift 0 → +1,6 p.b.), směr správný.
+
+**Data:** patch **16.17** vyšel ~3. 9.; crawler už má 2 398 her z 16.17. API bere patch s nejvíc hrami
+(zatím 16.16). **Blend priorů mezi patchi (plán §9.2 `patch_blend_days`) není implementován** — až
+16.17 převáží, model bude několik dní pracovat s málo daty. DB 255 MB / 500 MB; `prune --yes` smaže
+16.15 (1 815 her).
+
+**Návrh SPEC-08 (atributové vztahy, čeká na potvrzení):** atributy melee/ranged (Data Dragon
+`attackrange`), tagy, tankovitost (přijaté poškození) a AD/AP podíl (vlastní data); atributové
+matchupy jako hierarchický prior šampionských (řeší hlad po datech u counterů) a pro očekávané budoucí
+picky. Sonda 5. 9.: asasíni vs. počet tanků v nepřátelském týmu 51,8 → 48,2 % (n 9 000 → 7 750),
+Talon 57,6 → 43,5 %, Vayne 47,8 → 51,6 %; proti 5 ranged 58,6 % (n 1 245). Heimerdinger vs. melee
+se **nepotvrdil** (na lajně 49,9 vs. 50,0 %; proti melee-heavy týmu 39 %, n 112). Hypotéza H6.
