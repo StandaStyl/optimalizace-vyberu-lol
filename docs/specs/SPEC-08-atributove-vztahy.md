@@ -99,7 +99,11 @@ měření SPEC-07); replay s M = 3 000 / Y = 1 500 je v `data/replay-spec08.txt`
 |---|---|---|---|---|
 | výchozí (B + C + EB, atributy 0) — **uložen jako run 4**, zdroj pro UI | 131 / 50,4 % / 51,4 % | 242 / 50,0 / 50,8 | 0,0055 | 0,69285 |
 | priory M 3 000 / Y 1 500 (nejlepší grid holdoutu) | 204 / 52,5 % / 50,8 % | 303 / 46,2 / 50,6 | 0,0020 | 0,69298 |
-| atributy 0,5 | běží (pomalé: prior se počítá i pro budoucí picky), výsledek v `data/replay-spec08.txt` | | | |
+| atributy 0,5 | 85 / 50,6 % / 54,1 % | 158 / 51,9 / 53,1 | 0,0160 | 0,69310 |
+
+Atributy 0,5 v replay: rank 1 nadhodnocen o 3,5 p.b., rank 26+ podhodnocen o 1,3 p.b., ECE 3× horší,
+lift třídy 1 zmizel (+0,2 p.b.) — stejný obraz jako holdout: rozestoupí čísla, ale ne pravdivě.
+Replay je s atributy ~5× pomalejší (prior se počítá i pro každý očekávaný budoucí pick).
 
 Čtení: rank 1 se mezi vzorky hýbe o ±6 p.b. při n ≈ 130–200 (SPEC-07 měl 56,1 %, dnes 50,4 %) —
 je to šum, ne signál; celková kalibrace obou variant je dobrá a nerozlišitelná. Replay tedy změnu
