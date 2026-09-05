@@ -94,6 +94,17 @@ log-loss o 0,009). Priory M/Y byly nastaveny gridem na ~5 tis. hrách; s 20 tis.
 slábne a šum 25 + 10 párů se sčítá. **Rozhodnutí o změně priorů čeká na potvrzení** (mění i
 měření SPEC-07); replay s M = 3 000 / Y = 1 500 je v `data/replay-spec08.txt`.
 
+### Replay (500 her / 5 000 picků, patch 16.16, 5. 9. večer — jiný vzorek než SPEC-07)
+| varianta | rank 1: n / realita / predikce | rank 2–3 | ECE | log-loss |
+|---|---|---|---|---|
+| výchozí (B + C + EB, atributy 0) — **uložen jako run 4**, zdroj pro UI | 131 / 50,4 % / 51,4 % | 242 / 50,0 / 50,8 | 0,0055 | 0,69285 |
+| priory M 3 000 / Y 1 500 (nejlepší grid holdoutu) | 204 / 52,5 % / 50,8 % | 303 / 46,2 / 50,6 | 0,0020 | 0,69298 |
+| atributy 0,5 | běží (pomalé: prior se počítá i pro budoucí picky), výsledek v `data/replay-spec08.txt` | | | |
+
+Čtení: rank 1 se mezi vzorky hýbe o ±6 p.b. při n ≈ 130–200 (SPEC-07 měl 56,1 %, dnes 50,4 %) —
+je to šum, ne signál; celková kalibrace obou variant je dobrá a nerozlišitelná. Replay tedy změnu
+priorů M/Y ani nepodporuje, ani nevylučuje; rozhoduje holdout (log-loss 0,701 → 0,692).
+
 ## Návrh dalšího kroku (SPEC-09, k potvrzení)
 Jedna **kalibrační vrstva** nad součtem logitů (globální teplota / Plattův posun fitovaný na
 holdoutu, uložený v `model_run`): řeší přehnanou sebejistotu párové vrstvy i atributů naráz a
