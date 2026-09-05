@@ -232,3 +232,26 @@ validace i vedlejší zjištění o párové vrstvě jsou tam s čísly.
 
 **Pasti z dneška (v PONAUCENI):** Bash heredoc ztrácí `\\`; `Stop-Process` podle CommandLine zabil
 vlastní shell; CTE baseline → kartézský součin; syrová forma z 2 her = +13,8 logit.
+
+## 5d. Stav 5. 9. 2026 pozdě večer (SPEC-09 + priory)
+
+Přečti [`docs/specs/SPEC-09`](specs/SPEC-09-kalibracni-vrstva.md).
+
+**Rozhodnuto Janem a hotovo:**
+- Priory párové vrstvy **M 300 → 3 000, Y 150 → 1 500** (`DEFAULT_PARAMS`); testy mechanismu
+  (`score.test.ts`, `attr.test.ts`) běží explicitně s původními priory, protože testují mechaniku.
+- **Kalibrační vrstva:** `logit = sideLogit + S + termScale · D` (`teamTerms`/`teamLogit`,
+  `scoreDraft` škáluje každý ne‑silový člen). `model:calibrate [--attr W] [--persist]` fituje
+  na holdoutu s křížovou kontrolou na časových polovinách; tabulka `model_calibration` (0014);
+  API a CLI (`replay`, `score`) berou poslední kalibraci pro patch, pokud sedí priory.
+- První kalibrace (id 1): **τ = 0,176**, sideLogit 0,072; holdout CV log-loss 0,68988 < síla 0,69040
+  (poprvé plný model pod sílou), ECE 0,010. S atributy CV 0,69012 (horší) → `attrWeight` zůstává 0.
+- UI hlavička ukazuje „kalibrace τ 0,18 (datum)" nebo varování „bez kalibrace".
+- `loadTestGames` řadí podle času (dřív podle match_id, tj. podle platformy).
+
+**Denní rutina nově:** po refreshi agregátů `npm run model:calibrate -- --persist` a pak
+`npm run model:replay -- --games 500 --persist` (aby kontrola reality v UI odpovídala servírovanému
+modelu; API porovnává i `termScale` a priory). Obojí zatím ručně — zařadit do workeru je další krok.
+
+**Otevřené:** atributy pod kalibrací (per‑člen τ až bude víc dat), blend priorů mezi patchi,
+zařazení calibrate + replay do workeru, tierová pásma (H3).

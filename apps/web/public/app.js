@@ -75,6 +75,7 @@ async function doScore() {
   const classes = new Set(r.recommendations.map((x) => x.class)).size;
   $("#resultMeta").innerHTML = `patch ${r.patch} · pásmo ${r.band} · ${r.candidates} kandidátů ve ${classes} třídách · průměr pozice ${(r.fieldMean * 100).toFixed(1)} %`
     + ` · řazeno podle <b>spodní meze intervalu</b> (jistota, ne bodový odhad)`
+    + (r.calibration ? ` · kalibrace τ ${r.calibration.termScale.toFixed(2)} (${new Date(r.calibration.fittedAt).toLocaleDateString("cs-CZ")})` : ' · <span class="warn">bez kalibrace (τ 1)</span>')
     + (r.personalised ? " · <b>osobní</b> (s vaší historií)" : ' · <span class="warn">bez Riot ID = jen populační průměr — vaše vlastní historie je největší rozdíl</span>');
   // SPEC-07 D: what picks at each model rank actually delivered (replay), next to what was predicted.
   const rl = r.reality;

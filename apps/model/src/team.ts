@@ -39,14 +39,26 @@ function independence(sA: number, sB: number): number {
  * Matchup deviations are directional (A vs B = −(B vs A)), so the 25 cross pairs are counted once.
  */
 export function teamLogit(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, params: ModelParams, w: TermWeights): number {
+  const t = teamTerms(blue, red, src, params, w);
+  // SPEC-09: one calibration layer over the deviation terms (fitted on the holdout), plus the side
+  // term — blue is the first argument by convention everywhere (eval, replay, API winprob).
+  return params.sideLogit + t.strength + params.termScale * t.deviations;
+}
+
+/**
+ * The two parts of the team log-odds, before calibration: the strength baseline (its own
+ * calibration is good — holdout ECE 0.017) and the sum of all deviation terms (counters,
+ * synergies, player form, attribute prior), which is what SPEC-09 rescales.
+ */
+export function teamTerms(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, params: ModelParams, w: TermWeights): { strength: number; deviations: number } {
   const s = (t: TeamSlot) => {
     const x = src.strength(t.champ, t.pos);
     return mean(posterior(x?.wins ?? 0, (x?.games ?? 0) - (x?.wins ?? 0), 0.5, params.priorNStrength));
   };
   const sb = blue.map(s);
   const sr = red.map(s);
+  const strength = w.strength ? w.strength * (sb.reduce((a, p) => a + logit(p), 0) - sr.reduce((a, p) => a + logit(p), 0)) : 0;
   let x = 0;
-  if (w.strength) x += w.strength * (sb.reduce((a, p) => a + logit(p), 0) - sr.reduce((a, p) => a + logit(p), 0));
   if (w.matchup) {
     for (let i = 0; i < blue.length; i++)
       for (let j = 0; j < red.length; j++) {
@@ -87,7 +99,7 @@ export function teamLogit(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, p
     };
     x += w.player * (h(blue, sb) - h(red, sr));
   }
-  return x;
+  return { strength, deviations: x };
 }
 
 export function teamWinProb(blue: TeamSlot[], red: TeamSlot[], src: StatsSource, params: ModelParams, w: TermWeights = VARIANTS.full): number {

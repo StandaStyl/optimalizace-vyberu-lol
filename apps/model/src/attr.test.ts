@@ -38,7 +38,7 @@ function world(opts: { cellGames?: number; enemyKnowsMe?: boolean } = {}): Stats
 }
 // priorNAttr 500 keeps the hand-computed numbers below readable; the production default is 2 000 (see ModelParams)
 // attrWeight 1 here because the production default is 0 (validation, see ModelParams)
-const base = { ...DEFAULT_PARAMS, mcSamples: 200, futureWeight: 0, pilotExpGames: 0, selectionCorrection: false, attrDims: ["range"], priorNAttr: 500, attrWeight: 1 };
+const base = { ...DEFAULT_PARAMS, mcSamples: 200, futureWeight: 0, pilotExpGames: 0, selectionCorrection: false, attrDims: ["range"], priorNAttr: 500, attrWeight: 1, priorNMatchup: 300 };
 
 describe("SPEC-08: attribute prior for matchups", () => {
   it("shifts the matchup prior where the specific cell is empty, by the attribute-level deviation", () => {

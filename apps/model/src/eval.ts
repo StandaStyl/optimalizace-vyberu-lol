@@ -158,7 +158,7 @@ export async function loadTestGames(pool: pg.Pool, scope: EvalScope, from: Date 
     `select m.match_id, m.winner_team, p.puuid, p.team_id, p.champion_id, p.position
      from match m join participant p using (match_id)
      where m.patch = $1 and m.platform = any($2) and m.game_start >= $3 and m.game_start < $4 ${bandSql}
-     order by m.match_id`, params)).rows;
+     order by m.game_start, m.match_id`, params)).rows;   // time order: SPEC-09 cross-validates on time halves
   const games = new Map<string, TestGame>();
   for (const r of rows) {
     let g = games.get(r.match_id);

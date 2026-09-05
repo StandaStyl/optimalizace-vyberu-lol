@@ -2,12 +2,14 @@ import { getPool, loadConfig, type Position } from "@da/core";
 import { loadStatsSource } from "./dbSource.ts";
 import { DEFAULT_PARAMS, indifferenceClasses, scoreDraft, type Slot } from "./score.ts";
 import { gridSearch, persistEval, runEval } from "./eval.ts";
+import { applyCalibration, loadCalibration, persistCalibration, runCalibration } from "./calibrate.ts";
 import { runReplay } from "./replay.ts";
 
 const USAGE = `usage: model/cli.ts <command>
   refresh                          recompute materialised aggregates (refresh_aggregates())
   eval [--patch P] [--band B] [--cutoff-days N|--cutoff ISO] [--grid] [--persist]   holdout evaluation
-  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb|--no-eb] [--pilot N] [--attr W] [--persist]   retrospective draft replay (reality check)
+  replay [--patch P] [--band B] [--cutoff-days N] [--games N] [--priors S,M,Y,H] [--rank lower|mean] [--eb|--no-eb] [--pilot N] [--attr W] [--tau X] [--persist]   retrospective draft replay (reality check; uses the stored calibration unless overridden)
+  calibrate [--patch P] [--band B] [--cutoff-days N] [--attr W] [--persist]   SPEC-09: fit termScale + sideLogit on the holdout (cross-validated), optionally store
   score --pos BOTTOM [--patch 16.16] [--band low|mid|high] [--allies id:POS,...] [--enemies id[:POS],...] [--bans id,...] [--puuid X] [--top 10]`;
 
 function arg(argv: string[], name: string): string | undefined {
@@ -48,12 +50,13 @@ async function main(argv: string[]) {
       const mx = (await pool.query<{ mx: Date }>(`select max(game_start) mx from match where patch = $1`, [patch])).rows[0]!.mx;
       const cutoff = new Date(mx.getTime() - days * 86400_000);
       const scope = { patch, platforms: cfg.platforms, tierBand: band, cutoff };
-      let params = DEFAULT_PARAMS;
+      // SPEC-09: the replay describes the model as served — defaults + stored calibration — unless overridden below.
+      let params = applyCalibration(DEFAULT_PARAMS, await loadCalibration(pool, patch));
       const pr = arg(argv, "--priors");
       if (pr) {
         const ns = pr.split(",").map(Number);
         if (ns.length !== 4 || ns.some((x) => !Number.isFinite(x) || x <= 0)) throw new Error("--priors očekává S,M,Y,H (čtyři kladná čísla, např. 1000,1000,500,100)");
-        params = { ...DEFAULT_PARAMS, priorNStrength: ns[0]!, priorNMatchup: ns[1]!, priorNSynergy: ns[2]!, priorNPlayer: ns[3]! };
+        params = { ...params, priorNStrength: ns[0]!, priorNMatchup: ns[1]!, priorNSynergy: ns[2]!, priorNPlayer: ns[3]! };
       }
       // SPEC-07 switches, so the replay can compare decision rules and the pilot stratification.
       const rank = arg(argv, "--rank");
@@ -67,6 +70,8 @@ async function main(argv: string[]) {
       if (pilotArg !== undefined) params = { ...params, pilotExpGames: Number(pilotArg) };
       const attrArg = arg(argv, "--attr");
       if (attrArg !== undefined) params = { ...params, attrWeight: Number(attrArg) };
+      const tauArg = arg(argv, "--tau");
+      if (tauArg !== undefined) params = { ...params, termScale: Number(tauArg) };
       const { report } = await runReplay(pool, scope, params, arg(argv, "--games") ? { maxGames: Number(arg(argv, "--games")) } : {});
       console.log(`replay: ${report.games} games, ${report.picks} picks, coverage ${(report.coverage * 100).toFixed(1)} %`);
       console.log(`lift: class 1 WR ${(report.lift.class1.wr * 100).toFixed(1)} % (n=${report.lift.class1.n}) vs other ${(report.lift.other.wr * 100).toFixed(1)} % (n=${report.lift.other.n}) → ${(report.lift.diff * 100).toFixed(1)} p.b.`);
@@ -79,6 +84,27 @@ async function main(argv: string[]) {
         await pool.query(`insert into model_replay(run_id, games, picks, report) values ($1,$2,$3,$4)`, [run.rows[0]!.run_id, report.games, report.picks, JSON.stringify(report)]);
         console.log("saved replay run", run.rows[0]!.run_id);
       }
+      return;
+    }
+    if (cmd === "calibrate") {
+      const patch = arg(argv, "--patch") ?? (await pool.query<{ patch: string }>(`select patch from match group by 1 order by count(*) desc limit 1`)).rows[0]?.patch;
+      if (!patch) throw new Error("no data");
+      const band = (arg(argv, "--band") ?? null) as "low" | "mid" | "high" | null;
+      const days = Number(arg(argv, "--cutoff-days") ?? 3);
+      const mx = (await pool.query<{ mx: Date }>(`select max(game_start) mx from match where patch = $1`, [patch])).rows[0]!.mx;
+      const cutoff = new Date(mx.getTime() - days * 86400_000);
+      const scope = { patch, platforms: cfg.platforms, tierBand: band, cutoff };
+      const attrArg = arg(argv, "--attr");
+      const params = attrArg !== undefined ? { ...DEFAULT_PARAMS, attrWeight: Number(attrArg) } : DEFAULT_PARAMS;
+      const rep = await runCalibration(pool, scope, params);
+      console.log(`patch ${patch}, band ${band ?? "all"}, cutoff ${cutoff.toISOString()}, train ${rep.trainGames}, test ${rep.testGames} games, attrWeight ${params.attrWeight}`);
+      console.log(`fit on all test games: termScale ${rep.fit.termScale.toFixed(3)}, sideLogit ${rep.fit.sideLogit.toFixed(3)} (in-sample logloss ${rep.fit.logloss.toFixed(5)}); halves: ${rep.cv.termScales.map((t) => t.toFixed(3)).join(" / ")}`);
+      console.table([
+        { variant: "strength only", logloss: rep.strengthOnly.logloss.toFixed(5), auc: rep.strengthOnly.auc.toFixed(4), ece: rep.strengthOnly.ece.toFixed(4) },
+        { variant: "full, raw (τ = 1)", logloss: rep.raw.logloss.toFixed(5), auc: rep.raw.auc.toFixed(4), ece: rep.raw.ece.toFixed(4) },
+        { variant: "full, calibrated (cross-validated)", logloss: rep.cv.logloss.toFixed(5), auc: rep.cv.metrics.auc.toFixed(4), ece: rep.cv.metrics.ece.toFixed(4) },
+      ]);
+      if (argv.includes("--persist")) console.log("saved calibration", await persistCalibration(pool, rep));
       return;
     }
     if (cmd === "eval") {
@@ -113,7 +139,7 @@ async function main(argv: string[]) {
       if (puuid) await src.preloadPlayer(puuid);
       const names = new Map((await pool.query<{ champion_id: number; name: string }>(`select champion_id, name from champion`)).rows.map((r) => [r.champion_id, r.name]));
       const state = { myPos: pos, allies: slots(arg(argv, "--allies")), enemies: slots(arg(argv, "--enemies")), bans: (arg(argv, "--bans") ?? "").split(",").filter(Boolean).map(Number), ...(puuid ? { myPuuid: puuid } : {}) };
-      const recs = scoreDraft(state, src, DEFAULT_PARAMS);
+      const recs = scoreDraft(state, src, applyCalibration(DEFAULT_PARAMS, await loadCalibration(pool, patch)));
       const top = Number(arg(argv, "--top") ?? 10);
       const classes = indifferenceClasses(recs);
       const classOf = new Map<number, number>();

@@ -52,11 +52,23 @@ export interface ModelParams {
   priorNAttrGroup: number;
   /** Attribute dimensions used; each is a partition of champions (champion_attr.dim). */
   attrDims: string[];
+  /**
+   * SPEC-09: calibration layer. Every deviation term (counters, synergies, player form, future
+   * picks, attribute prior) is multiplied by termScale; the strength baseline is not (it is
+   * calibrated on its own). Fitted on the holdout by `model:calibrate`, stored in
+   * model_calibration and loaded by the API/CLI; 1 = raw model.
+   */
+  termScale: number;
+  /** Blue-side advantage in logit, fitted with termScale; used only where sides are known (team win-prob). */
+  sideLogit: number;
 }
 export const DEFAULT_PARAMS: ModelParams = {
   priorNStrength: 500,
-  priorNMatchup: 300,
-  priorNSynergy: 150,
+  // Raised 300 → 3000 and 150 → 1500 on 5. 9. 2026 (Jan's decision after the SPEC-08 grid on
+  // 20 479 / 2 654 games: full model log-loss 0.70134 → 0.69223, ECE 0.056 → 0.028; the old
+  // values came from a grid on ~5k games with maxima 1000 / 500).
+  priorNMatchup: 3000,
+  priorNSynergy: 1500,
   priorNPlayer: 30,
   recencyTauDays: 60,
   intervalLevel: 0.8,
@@ -74,6 +86,8 @@ export const DEFAULT_PARAMS: ModelParams = {
   priorNAttr: 2000,
   priorNAttrGroup: 2000,
   attrDims: ["range", "mobility", "class", "toughness", "dmgtype"],
+  termScale: 1,
+  sideLogit: 0,
 };
 
 export interface WinLoss {
@@ -444,6 +458,19 @@ export function scoreDraft(state: DraftState, src: StatsSource, params: ModelPar
       terms.push({ c: { kind: "future_synergy", logOdds: params.futureWeight * fs, games: fsGames }, post: null, expectedLogit: 0, weight: 0, sVar: 0 });
     }
     threats.sort((a, b) => a.pPick * a.logOdds - b.pPick * b.logOdds);
+
+    // SPEC-09: calibration layer — every deviation term (everything but the strength baseline) is
+    // rescaled by termScale fitted on the holdout. Applied to the point estimate, the MC samples
+    // (via weight) and the reported contributions alike, so what is shown is what was used.
+    if (params.termScale !== 1) {
+      for (const t of terms) {
+        if (t.c.kind === "strength") continue;
+        t.c.logOdds *= params.termScale;
+        if (t.c.attr !== undefined) t.c.attr *= params.termScale;
+        t.weight *= params.termScale;
+      }
+      for (const th of threats) th.logOdds *= params.termScale;
+    }
 
     const point = terms.reduce((acc, t) => acc + t.c.logOdds, 0);
     // Monte-Carlo interval: sample each term's posterior independently.

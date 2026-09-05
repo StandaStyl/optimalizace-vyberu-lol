@@ -4,7 +4,7 @@ import { extname, join, normalize } from "node:path";
 import type pg from "pg";
 import { POSITIONS, type Platform, type Position, type RiotClient, type TierBand } from "@da/core";
 import { resolveProfile } from "./profile.ts";
-import { championPage, DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadStatsSource, recommendBans, scoreDraft, teamLogit, teamWinProb, VARIANTS, type DbStatsSource, type Slot, type TeamSlot, type TermWeights } from "@da/model";
+import { applyCalibration, championPage, DEFAULT_PARAMS, indifferenceClasses, inferEnemyPositions, loadCalibration, loadStatsSource, recommendBans, scoreDraft, teamLogit, teamWinProb, VARIANTS, type DbStatsSource, type ModelParams, type Slot, type TeamSlot, type TermWeights } from "@da/model";
 
 export interface ApiOptions {
   pool: pg.Pool;
@@ -22,6 +22,9 @@ interface Cached {
   names: Map<number, { name: string; key: string }>;
   ddragon: string;
   loadedAt: number;
+  /** SPEC-09: defaults overlaid with the latest persisted calibration for this patch (termScale, sideLogit, attrWeight). */
+  params: ModelParams;
+  calibration: { fittedAt: string; termScale: number; sideLogit: number; attrWeight: number } | null;
   /** SPEC-07 D: realised WR by model rank from the newest persisted replay run with the current defaults. */
   reality: { runId: number; createdAt: string; games: number; picks: number; byRank: Array<{ bucket: string; n: number; wr: number; meanP: number }> } | null;
 }
@@ -45,13 +48,18 @@ export function createApi(opts: ApiOptions) {
     // SPEC-07 D: the selection effect at the top of the list is not modelled away, it is shown —
     // "picks that were rank 1 for us realised X % at a predicted Y %" from a replay run whose
     // decision rule and priors are the ones serving now (any other run would describe a different model).
-    const same = (p: Record<string, unknown>) => p.rankBy === DEFAULT_PARAMS.rankBy && p.selectionCorrection === DEFAULT_PARAMS.selectionCorrection
-      && p.pilotExpGames === DEFAULT_PARAMS.pilotExpGames && (p.attrWeight ?? 0) === DEFAULT_PARAMS.attrWeight && p.priorNPlayer === DEFAULT_PARAMS.priorNPlayer;
+    // SPEC-09: the served parameters are the defaults plus the latest calibration fitted for this patch.
+    const cal = await loadCalibration(opts.pool, patchRow.patch);
+    const params = applyCalibration(DEFAULT_PARAMS, cal);
+    const same = (p: Record<string, unknown>) => p.rankBy === params.rankBy && p.selectionCorrection === params.selectionCorrection
+      && p.pilotExpGames === params.pilotExpGames && (p.attrWeight ?? 0) === params.attrWeight && p.priorNPlayer === params.priorNPlayer
+      && p.priorNMatchup === params.priorNMatchup && p.priorNSynergy === params.priorNSynergy && (p.termScale ?? 1) === params.termScale;
     const run = (await opts.pool.query<{ run_id: number; created_at: Date; games: number; picks: number; by_rank: Array<{ bucket: string; n: number; wr: number; meanP: number }>; params: Record<string, unknown> }>(
       `select r.run_id, r.created_at, p.games, p.picks, p.report->'byRank' as by_rank, r.params
        from model_replay p join model_run r using (run_id) where r.params->>'kind' = 'replay' and r.patch = $1 order by r.run_id desc limit 20`, [patchRow.patch])).rows.find((r) => same(r.params));
     const reality = run ? { runId: run.run_id, createdAt: run.created_at.toISOString(), games: run.games, picks: run.picks, byRank: run.by_rank } : null;
-    return { patch: patchRow.patch, byBand, names, ddragon: patchRow.ddragon_ver, loadedAt: Date.now(), reality };
+    const calibration = cal && params.termScale === cal.termScale ? { fittedAt: cal.fittedAt.toISOString(), termScale: cal.termScale, sideLogit: cal.sideLogit, attrWeight: cal.attrWeight } : null;
+    return { patch: patchRow.patch, byBand, names, ddragon: patchRow.ddragon_ver, loadedAt: Date.now(), params, calibration, reality };
   }
   async function get(): Promise<Cached> {
     if (cache && Date.now() - cache.loadedAt < reloadMs) return cache;
@@ -89,7 +97,7 @@ export function createApi(opts: ApiOptions) {
         const src = c.byBand.get(typeof body.band === "string" && c.byBand.has(body.band) ? body.band : "all")!;
         const state = { myPos: body.myPos, allies: parseSlots(body.allies), enemies: parseSlots(body.enemies), bans: Array.isArray(body.bans) ? body.bans.map(Number).filter(Number.isInteger) : [], ...(typeof body.myPuuid === "string" ? { myPuuid: body.myPuuid } : {}) };
         if (state.myPuuid) await src.preloadPlayer(state.myPuuid);
-        const recs = scoreDraft(state, src, DEFAULT_PARAMS);
+        const recs = scoreDraft(state, src, c.params);
         const classes = indifferenceClasses(recs);
         const classOf = new Map<number, number>(); classes.forEach((cl, i) => cl.forEach((ch) => classOf.set(ch, i + 1)));
         const enemyPositions = Object.fromEntries([...inferEnemyPositions(state.enemies, src)].map(([k, v]) => [k, v]));
@@ -98,7 +106,7 @@ export function createApi(opts: ApiOptions) {
         const top = Math.min(Number(body.top ?? 20), 200);
         const fieldMean = recs.length ? recs.reduce((a, r) => a + r.p, 0) / recs.length : 0.5;
         const nm = (id: number) => c.names.get(id)?.name ?? String(id);
-        const bans = recommendBans(state, recs, src, DEFAULT_PARAMS).map((b) => ({ ...b, name: nm(b.champ), key: c.names.get(b.champ)?.key }));
+        const bans = recommendBans(state, recs, src, c.params).map((b) => ({ ...b, name: nm(b.champ), key: c.names.get(b.champ)?.key }));
         const recommendations = recs.slice(0, top).map((r) => ({ champ: r.champ, name: nm(r.champ), key: c.names.get(r.champ)?.key, class: classOf.get(r.champ), p: r.p, lo: r.lo, hi: r.hi,
           contributions: r.contributions.filter((x) => x.kind === "strength" || Math.abs(x.logOdds) >= 0.005).map((x) => ({ ...x, vsName: x.vs ? nm(x.vs) : undefined })),
           threats: r.threats.map((t) => ({ ...t, name: nm(t.champ) })) }));
@@ -117,7 +125,7 @@ export function createApi(opts: ApiOptions) {
 
         return json(res, 200, {
           patch: c.patch, band: src.scope.tierBand ?? "all", myPos: state.myPos, candidates: recs.length, enemyPositions,
-          fieldMean, rankedBy: DEFAULT_PARAMS.rankBy, personalised: !!state.myPuuid, reality: c.reality,
+          fieldMean, rankedBy: c.params.rankBy, personalised: !!state.myPuuid, reality: c.reality, calibration: c.calibration,
           recommendations, bans, ...(logId === undefined ? {} : { logId }),
         });
       }
@@ -136,7 +144,7 @@ export function createApi(opts: ApiOptions) {
         if (!c.names.has(id)) return json(res, 404, { error: "unknown champion" });
         const band = url.searchParams.get("band") ?? "all";
         const src = c.byBand.get(c.byBand.has(band) ? band : "all")!;
-        const page = championPage(id, src, DEFAULT_PARAMS);
+        const page = championPage(id, src, c.params);
         const nm = (x: number) => ({ name: c.names.get(x)?.name ?? String(x), key: c.names.get(x)?.key });
         return json(res, 200, { patch: c.patch, band, ...nm(id), ...page,
           byPosition: page.byPosition.map((b) => ({ ...b, counters: b.counters.map((r) => ({ ...r, ...nm(r.champ) })), countered: b.countered.map((r) => ({ ...r, ...nm(r.champ) })), synergies: b.synergies.map((r) => ({ ...r, ...nm(r.champ) })), antiSynergies: b.antiSynergies.map((r) => ({ ...r, ...nm(r.champ) })) })) });
@@ -154,16 +162,16 @@ export function createApi(opts: ApiOptions) {
         const terms = Object.fromEntries(kinds.map((k) => {
           const w: TermWeights = { strength: 0, matchup: 0, synergy: 0, player: 0 };
           w[k] = 1;
-          return [k, teamLogit(blue, red, src, DEFAULT_PARAMS, w)];
+          return [k, teamLogit(blue, red, src, c.params, w)];
         }));
         // Impact in probability points: full model minus the same model without that term.
-        const pFull = teamWinProb(blue, red, src, DEFAULT_PARAMS, VARIANTS.full);
+        const pFull = teamWinProb(blue, red, src, c.params, VARIANTS.full);
         const impact = Object.fromEntries(kinds.map((k) => {
           const w: TermWeights = { ...VARIANTS.full };
           w[k] = 0;
-          return [k, pFull - teamWinProb(blue, red, src, DEFAULT_PARAMS, w)];
+          return [k, pFull - teamWinProb(blue, red, src, c.params, w)];
         }));
-        const byVariant = Object.fromEntries(Object.entries(VARIANTS).map(([k, w]) => [k, teamWinProb(blue, red, src, DEFAULT_PARAMS, w)]));
+        const byVariant = Object.fromEntries(Object.entries(VARIANTS).map(([k, w]) => [k, teamWinProb(blue, red, src, c.params, w)]));
         return json(res, 200, {
           patch: c.patch, band: src.scope.tierBand ?? "all", blue: blue.length, red: red.length,
           pBlue: pFull, pBluePairwise: byVariant.pairwise, byVariant, terms, impact,

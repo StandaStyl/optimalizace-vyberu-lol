@@ -6,4 +6,5 @@ export * from "./metrics.ts";
 export * from "./eval.ts";
 export * from "./replay.ts";
 export * from "./championPage.ts";
+export * from "./calibrate.ts";
 export const MODEL_VERSION = "0.1.0";

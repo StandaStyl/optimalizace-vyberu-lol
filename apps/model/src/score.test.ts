@@ -49,7 +49,8 @@ describe("inferEnemyPositions", () => {
 });
 
 describe("scoreDraft", () => {
-  const fast = { ...DEFAULT_PARAMS, mcSamples: 300 };
+  // mechanism tests were written against the 2026-08 priors; the production defaults are M 3000 / Y 1500 (SPEC-08 grid)
+  const fast = { ...DEFAULT_PARAMS, mcSamples: 300, priorNMatchup: 300, priorNSynergy: 150 };
 
   it("ranks by strength when nothing else is known and returns intervals", () => {
     const recs = scoreDraft({ myPos: "BOTTOM", allies: [], enemies: [], bans: [] }, world(), { ...fast, futureWeight: 0 });
